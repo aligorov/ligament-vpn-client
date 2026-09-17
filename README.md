@@ -67,12 +67,16 @@ OpenID Connect) или логин/пароль портала; конфиги п
 драйверы Windows / NetworkExtension — см. Roadmap): профили видно, но
 подключение честно сообщит об этом.
 
-DMG не подписан Apple Developer ID, поэтому при первом запуске:
-правый клик по приложению → «Открыть», либо терминалом:
+**Первый запуск** (сборка без подписи Apple Developer ID, поэтому macOS
+помечает скачанное приложение карантином и на Apple Silicon пишет
+«приложение повреждено»):
 
-```bash
-xattr -cr "/Applications/Ligament VPN.app"
-```
+1. Смонтируйте DMG и перетащите Ligament VPN в «Программы».
+2. В том же DMG лежит **Enable-LigamentVPN.command** — запустите его
+   двойным кликом (он снимет карантин и откроет приложение). Разрешите
+   запуск в Terminal, если система спросит.
+3. Альтернатива руками в Терминале:
+   `xattr -cr "/Applications/Ligament VPN.app" && open "/Applications/Ligament VPN.app"`
 
 Сторонние движки (OpenVPN, Xray-core, tun2socks, tunnel.dll WireGuard) уже
 внутри пакета: они скачиваются при сборке CI по пиннингу SHA256 из

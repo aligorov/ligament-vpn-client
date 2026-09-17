@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ligament VPN",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.ligament.corpvpn",
   "build": {
     "beforeDevCommand": "npm --prefix ../ui run dev",
@@ -44,7 +44,8 @@
     },
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "installerHooks": "./nsis-hooks.nsh"
       },
       "webviewInstallMode": {
         "type": "offlineInstaller"

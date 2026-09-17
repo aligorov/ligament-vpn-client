@@ -57,6 +57,7 @@ jobs:
         run: |
           mkdir -p dist
           find app/src-tauri/target/release/bundle -type f -name '*.dmg' -exec cp {} dist/ \;
+          cp installer/Enable-LigamentVPN.command dist/
           ls -la dist/
 
       - name: Create GitHub Release
@@ -65,6 +66,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.dmg
+            dist/Enable-LigamentVPN.command
 
   windows-release:
     name: Windows installers (NSIS + MSI)
