@@ -33,7 +33,7 @@ async fn roundtrip(id: u64, req_line: &str) -> Result<Value, String> {
     let pipe = ClientOptions::new()
         .open(PIPE_PATH)
         .map_err(|_| DAEMON_ERR.to_string())?;
-    let (rx, mut tx) = pipe.split();
+    let (rx, mut tx) = tokio::io::split(pipe);
     tx.write_all(req_line.as_bytes())
         .await
         .map_err(|e| format!("Запись в канал службы: {e}"))?;
@@ -51,7 +51,7 @@ async fn roundtrip(id: u64, req_line: &str) -> Result<Value, String> {
     let stream = UnixStream::connect(SOCK_PATH)
         .await
         .map_err(|_| DAEMON_ERR.to_string())?;
-    let (rx, mut tx) = stream.into_split();
+    let (rx, mut tx) = tokio::io::split(stream);
     tx.write_all(req_line.as_bytes())
         .await
         .map_err(|e| format!("Запись в сокет службы: {e}"))?;
@@ -107,7 +107,7 @@ async fn notifications_once(app: &tauri::AppHandle) -> Result<(), String> {
     let pipe = tokio::net::windows::named_pipe::ClientOptions::new()
         .open(PIPE_PATH)
         .map_err(|_| DAEMON_ERR.to_string())?;
-    let (rx, _tx) = pipe.split();
+    let (rx, _tx) = tokio::io::split(pipe);
     let mut reader = BufReader::new(rx);
     let mut line = String::new();
     loop {
@@ -126,7 +126,7 @@ async fn notifications_once(app: &tauri::AppHandle) -> Result<(), String> {
     let stream = tokio::net::UnixStream::connect(SOCK_PATH)
         .await
         .map_err(|_| DAEMON_ERR.to_string())?;
-    let (rx, _tx) = stream.into_split();
+    let (rx, _tx) = tokio::io::split(stream);
     let mut reader = BufReader::new(rx);
     let mut line = String::new();
     loop {

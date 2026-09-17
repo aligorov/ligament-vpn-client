@@ -46,8 +46,14 @@ jobs:
 
       # Компиляция Windows-специфики (служба, pipe, движки) — без запуска
       # тестов: юнит-тесты vpncore уже отработали на macOS.
-      - name: cargo check
+      - name: cargo check (daemon workspace)
         run: cargo check --workspace
+
+      # Tauri-хост: движки для ресурсов не нужны — placeholder из репо;
+      # ловим cfg(windows)-ошибки (напр. NamedPipeClient API) до релиза.
+      - name: cargo check (tauri app)
+        working-directory: app/src-tauri
+        run: cargo check
 
   ui:
     name: ui (tsc + vite build)
