@@ -54,16 +54,16 @@ jobs:
         working-directory: app/ui
         run: npm install
 
-      - name: Build Tauri app (NSIS + MSI)
+      - name: Build Tauri app (NSIS)
         working-directory: app
-        run: npx @tauri-apps/cli build --bundles nsis,msi
+        run: npx @tauri-apps/cli build --bundles nsis
 
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p dist
           find app/src-tauri/target/release/bundle -type f \
-            \( -name 'LigamentVPN_*_x64-setup.exe' -o -name 'LigamentVPN_*_x64*.msi' \) \
+            \( -name '*_x64-setup.exe' -o -name '*_x64*.msi' \) \
             -exec cp {} dist/ \;
           cp installer/install-service.ps1 dist/
           cp installer/GUIDE-GPO.md dist/
@@ -86,7 +86,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/LigamentVPN_*_x64-setup.exe
-            dist/LigamentVPN_*_x64*.msi
+            dist/*_x64-setup.exe
+            dist/*_x64*.msi
             dist/install-service.ps1
             dist/GUIDE-GPO.md
