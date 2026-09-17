@@ -73,10 +73,15 @@ fn run_service_loop() -> Result<(), Box<dyn std::error::Error>> {
         status_handle.set_service_status(pending)?;
     }
     let checkpoint_handle = status_handle;
+    let stop_ticker = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = Arc::clone(&stop_ticker);
     let ticker = std::thread::spawn(move || {
         let mut cp = 1u32;
-        while cp < 30 {
+        while cp < 30 && !flag.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::sleep(Duration::from_secs(1));
+            if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
             let mut pending = service_status(ServiceState::StartPending);
             pending.checkpoint = cp;
             pending.wait_hint = Duration::from_secs(30);
@@ -98,8 +103,10 @@ fn run_service_loop() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let state = runtime.block_on(async { crate::bootstrap_state() })?;
 
-    // остановить checkpoint-тикер: переводом в Running SCM сам завершает фазу
-    drop(ticker);
+    // Остановить тикер ДО Running и ДОЖДАТЬСЯ его: иначе тикер через секунду
+    // перезапишет Running обратно в StartPending (гонка, поймана CI-e2e).
+    stop_ticker.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = ticker.join();
     let serve_state = Arc::clone(&state);
     runtime.spawn(async move {
         if let Err(e) = crate::rpc::serve(serve_state).await {
