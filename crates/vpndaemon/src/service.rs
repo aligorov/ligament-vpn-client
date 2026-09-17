@@ -25,9 +25,17 @@ pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Реальный main службы (вызывается через макрос).
 fn windows_service_main(_arguments: Vec<std::ffi::OsString>) {
+    // stderr/журнал событий из службы недоступны — любые паники и ошибки
+    // старта пишем в %PROGRAMDATA%\Ligament\CorpVPN\logs\corpvpnd-crash.log,
+    // иначе падение службы невозможно диагностировать.
+    let crash_path = crate::paths::logs_dir().join("corpvpnd-crash.log");
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = std::fs::create_dir_all(crate::paths::logs_dir());
+        let _ = std::fs::write(&crash_path, format!("panic: {info}\n"));
+    }));
     if let Err(e) = run_service_loop() {
-        // больше писать некуда — журнал событий недоступен, stderr пуст
-        eprintln!("corpvpnd: критическая ошибка службы: {e}");
+        let _ = std::fs::create_dir_all(crate::paths::logs_dir());
+        let _ = std::fs::write(crate::paths::logs_dir().join("corpvpnd-crash.log"), format!("service error: {e}\n"));
     }
 }
 

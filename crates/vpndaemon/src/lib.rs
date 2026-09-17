@@ -26,8 +26,11 @@ pub mod state;
 #[cfg(windows)]
 pub mod service;
 
-/// Имя службы Windows.
-pub const SERVICE_NAME: &str = "corpvpnd";
+/// Имя службы Windows. ДОЛЖНО совпадать с регистрацией в SCM буква-в-букву
+/// (install-service.ps1 и NSIS-хуки создают службу «CorpVPND»): диспетчер
+/// windows-service соединяется с SCM по этому имени, при несовпадении
+/// StartServiceCtrlDispatcher падает и служба не стартует (баг v0.1.0–v0.2.1).
+pub const SERVICE_NAME: &str = "CorpVPND";
 
 use std::sync::Arc;
 use vpncore::policy::DefaultPolicyProvider;

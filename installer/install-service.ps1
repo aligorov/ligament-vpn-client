@@ -48,9 +48,6 @@ if ($existing) {
 # Восстановление после сбоев: перезапуск через 5с/5с/60с (включая сброс при отказе).
 & sc.exe failure $service reset= 86400 actions= restart/5000/restart/5000/restart/60000 | Out-Null
 
-# Зависимости службы от сетевых подсистем (требование tunnel.dll: Nsi, TcpIp).
-& sc.exe config $service depend= Nsi/TcpIp | Out-Null
-
 Start-Service -Name $service
 Write-Host "Готово: служба $service запущена ($bin)"
 Write-Host "Логи: $data\logs; канал UI: \\.\pipe\corpvpn-daemon"

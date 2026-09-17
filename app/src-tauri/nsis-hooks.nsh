@@ -16,8 +16,8 @@
   nsExec::ExecToLog 'sc.exe description CorpVPND "Ligament VPN — служба управления туннелями WireGuard/OpenVPN/VLESS"'
   ; Автоперезапуск при сбоях: 5с/5с/60с, сброс счётчика раз в сутки
   nsExec::ExecToLog 'sc.exe failure CorpVPND reset= 86400 actions= restart/5000/restart/5000/restart/60000'
-  ; tunnel.dll (embeddable-dll-service) требует зависимости Nsi/TcpIp
-  nsExec::ExecToLog 'sc.exe config CorpVPND depend= Nsi/TcpIp'
+  ; Зависимости Nsi/TcpIp нужны туннельным службам WireGuardTunnel$*
+  ; (их создаёт сам демон), службе-демону они не требуются.
   nsExec::ExecToLog 'sc.exe start CorpVPND'
 !macroend
 
