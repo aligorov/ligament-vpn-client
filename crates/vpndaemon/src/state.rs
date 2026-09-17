@@ -197,7 +197,7 @@ impl AppState {
         let kind = profile.kind;
         let mut engine =
             ActiveEngine::for_profile(&profile).ok_or_else(|| RpcFailure::new(
-                "Неподдерживаемый вид профиля в этой сборке",
+                "Этот протокол доступен только в Windows-сборке клиента",
             ))?;
         let ctx = EngineCtx {
             profile: profile.clone(),
@@ -467,13 +467,41 @@ mod tests {
         p
     }
 
+
+    /// Валидная VLESS/REALITY ссылка для тестов.
+    fn vless_uri() -> String {
+        "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@vpn.example.com:443?security=reality&pbk=pubkey&sid=abcd1234&sni=vpn.example.com&fp=chrome&flow=xtls-rprx-vision&type=tcp#test".to_owned()
+    }
+
+    /// Каталог движков с фейковым `xray` (sleep-скрипт): реальные тесты
+    /// запуска VLESS-движка на unix без бинарника xray. Один на процесс.
+    fn ensure_fake_xray() {
+        use std::sync::OnceLock;
+        static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let dir = DIR.get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let xray = dir.path().join("xray");
+                std::fs::write(&xray, "#!/bin/sh\nsleep 3600\n").unwrap();
+                let mut perm = std::fs::metadata(&xray).unwrap().permissions();
+                perm.set_mode(0o755);
+                std::fs::set_permissions(&xray, perm).unwrap();
+            }
+            dir
+        });
+        std::env::set_var("CORPVPN_ENGINE_DIR", dir.path());
+    }
+
     #[tokio::test]
     async fn connect_disconnect_lifecycle() {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(&dir, Policies::default());
-        let profile = state.import_profile("corp", &wg_profile().wg.unwrap().config).await.unwrap();
+        ensure_fake_xray();
+        let profile = state.import_profile("corp", &vless_uri()).await.unwrap();
         let _ = state.connect(&profile.id, None).await.unwrap();
-        // stub-движок на не-Windows подключается мгновенно
+        // VLESS-движок (фейковый xray) подключается мгновенно
         let s = state.state().await;
         assert_eq!(s.status, VpnStatus::Connected);
         assert_eq!(s.active_profile_id.as_deref(), Some(profile.id.as_str()));
@@ -486,8 +514,9 @@ mod tests {
     async fn single_active_tunnel_enforced() {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(&dir, Policies::default());
-        let p1 = state.import_profile("a", &wg_profile().wg.unwrap().config).await.unwrap();
-        let p2 = state.import_profile("b", &wg_profile().wg.unwrap().config).await.unwrap();
+        ensure_fake_xray();
+        let p1 = state.import_profile("a", &vless_uri()).await.unwrap();
+        let p2 = state.import_profile("b", &vless_uri()).await.unwrap();
         state.connect(&p1.id, None).await.unwrap();
         let err = state.connect(&p2.id, None).await.unwrap_err();
         assert!(err.user_message.contains("Уже есть активное"));

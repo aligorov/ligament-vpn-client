@@ -98,6 +98,7 @@ async fn request(stream: &mut UnixStream, method: &str, params: &str) -> serde_j
 async fn full_rpc_session_over_unix_socket() {
     let _ = std::fs::remove_file(TEST_SOCKET);
     let state = spawn_server_on(TEST_SOCKET);
+    ensure_fake_xray();
 
     let mut client = UnixStream::connect(TEST_SOCKET).await.unwrap();
 
@@ -117,14 +118,27 @@ async fn full_rpc_session_over_unix_socket() {
     )
     .await;
     assert_eq!(v["result"]["kind"], "wireguard");
-    let profile_id = v["result"]["id"].as_str().unwrap().to_owned();
+    let _profile_id = v["result"]["id"].as_str().unwrap().to_owned();
 
-    // подключаемся (stub-движок) и слушаем уведомления state.changed
+    // подключаемся (реальный VLESS-движок + фейковый xray) и слушаем
+    // уведомления state.changed
+    let vless_uri = "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@vpn.example.com:443?security=reality&pbk=pubkey&sid=abcd1234&sni=vpn.example.com&fp=chrome&flow=xtls-rprx-vision&type=tcp#test";
+    let v = request(
+        &mut client,
+        "corpvpn.profiles.import",
+        &format!(
+            r#"{{"name":"Обход","config":{}}}"#,
+            serde_json::to_string(vless_uri).unwrap()
+        ),
+    )
+    .await;
+    let vless_id = v["result"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(v["result"]["kind"], "vless");
     let mut notify_client = UnixStream::connect(TEST_SOCKET).await.unwrap();
     let v = request(
         &mut client,
         "corpvpn.connect",
-        &format!(r#"{{"profileId":"{profile_id}"}}"#),
+        &format!(r#"{{"profileId":"{vless_id}"}}"#),
     )
     .await;
     assert_eq!(v["result"]["status"], "connected", "ответ connect: {v}");
@@ -171,4 +185,22 @@ async fn notifications_log_entry_broadcast() {
     tx.send(frame).unwrap();
     let received = rx.recv().await.unwrap();
     assert!(received.contains("log.entry"));
+}
+
+/// Фейковый xray (sleep-скрипт) в temp-каталоге движков: VLESS-движок
+/// запускается по-настоящему, без бинарника xray (только unix-тесты).
+fn ensure_fake_xray() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::OnceLock;
+    static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+    let dir = DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let xray = dir.path().join("xray");
+        std::fs::write(&xray, "#!/bin/sh\nsleep 3600\n").unwrap();
+        let mut perm = std::fs::metadata(&xray).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&xray, perm).unwrap();
+        dir
+    });
+    std::env::set_var("CORPVPN_ENGINE_DIR", dir.path());
 }

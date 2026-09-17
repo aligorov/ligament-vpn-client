@@ -16,11 +16,11 @@ powershell -ExecutionPolicy Bypass -File installer/fetch-engines.ps1
 
 ```
 engines/
-├── corpvpnd.exe        # служба (собирается из crates/vpndaemon)
-├── openvpn/            # openvpn.exe 2.7 + libssl/libcrypto (из MSI)
-├── xray/               # xray.exe (VLESS/REALITY)
-├── tun2socks/          # tun2socks.exe (системный режим VLESS)
-└── wireguard/          # tunnel.dll + wireguard.dll (из официального MSI)
+├── corpvpnd[.exe]      # демон/служба (собирается из crates/vpndaemon)
+├── openvpn/            # Windows: openvpn.exe 2.7 + libssl/libcrypto (из MSI)
+├── xray/               # Windows: xray.exe; macOS: xray (arm64) — VLESS/REALITY
+├── tun2socks/          # Windows: tun2socks.exe (системный режим VLESS)
+└── wireguard/          # Windows: tunnel.dll + wireguard.dll (из официального MSI)
 ```
 
 Этот README нужен и для локальной разработки: Tauri требует, чтобы glob

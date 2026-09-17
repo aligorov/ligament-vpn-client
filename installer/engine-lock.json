@@ -14,7 +14,10 @@
       "format": "msi",
       "extract": "msiexec /a <msi> /qn TARGETDIR=<dir> — взять <dir>/OpenVPN/bin/* (openvpn.exe + libcrypto/libssl/lz4/dco) в engines/openvpn/",
       "license": "GPL-2.0 с OpenSSL linking exception (двоичник не модифицируется)",
-      "dest": "openvpn"
+      "dest": "openvpn",
+      "platforms": [
+        "win"
+      ]
     },
     "xray": {
       "version": "v26.3.27",
@@ -23,7 +26,10 @@
       "format": "zip",
       "extract": "Expand-Archive: xray.exe + geoip.dat + geosite.dat в engines/xray/",
       "license": "MPL-2.0",
-      "dest": "xray"
+      "dest": "xray",
+      "platforms": [
+        "win"
+      ]
     },
     "tun2socks": {
       "version": "v2.7.0",
@@ -32,7 +38,10 @@
       "format": "zip",
       "extract": "Expand-Archive: tun2socks.exe (+ wintun.dll в архиве) в engines/tun2socks/",
       "license": "MIT",
-      "dest": "tun2socks"
+      "dest": "tun2socks",
+      "platforms": [
+        "win"
+      ]
     },
     "wireguard": {
       "version": "1.1",
@@ -41,7 +50,10 @@
       "format": "msi",
       "extract": "msiexec /a <msi> /qn TARGETDIR=<dir> — взять tunnel.dll (embeddable WireGuard Tunnel Library, внутри уже есть подписанный WireGuardNT-драйвер wireguard.dll) в engines/wireguard/. NOTE: отдельный embeddable-dll-service-*.zip с download.wireguard.com больше не публикуется (проверено 2026-09), официальный MSI — тот же артефакт от команды WireGuard, подписан.",
       "license": "WireGuard for Windows — MIT; wireguard.dll — Prebuilt Binaries License",
-      "dest": "wireguard"
+      "dest": "wireguard",
+      "platforms": [
+        "win"
+      ]
     },
     "wireguard-src": {
       "version": "v1.1",
@@ -50,7 +62,22 @@
       "format": "tar.gz",
       "extract": "Опционально: сборка embeddable-dll-service из исходников (Go + MinGW: make в embeddable-dll-service/) как альтернатива извлечению tunnel.dll из MSI",
       "license": "MIT",
-      "dest": "wireguard-src"
+      "dest": "wireguard-src",
+      "platforms": [
+        "win"
+      ]
+    },
+    "xray-darwin": {
+      "version": "v26.3.27",
+      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-arm64-v8a.zip",
+      "sha256": "2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf",
+      "format": "zip",
+      "extract": "unzip/Expand-Archive: xray + geoip.dat + geosite.dat в engines/xray/ (макосный бинарник без суффикса .exe)",
+      "license": "MPL-2.0",
+      "dest": "xray",
+      "platforms": [
+        "darwin"
+      ]
     }
   }
 }

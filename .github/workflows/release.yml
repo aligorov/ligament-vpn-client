@@ -1,7 +1,7 @@
-# Релиз: сборка установщиков Windows (NSIS + MSI) и публикация GitHub Release.
-# Запуск — тегом v* (например, v1.0.0). Публичный репозиторий: для сборки
-# секреты не нужны; подпись Azure Trusted Signing — опциональный шаг
-# (см. installer/signing.md), включается переменными TS_*/AZURE_*.
+# Релиз: установщики Windows (NSIS) и macOS (DMG) + GitHub Release.
+# Запуск — тегом v* (например, v0.2.0). Публичный репозиторий: для сборки
+# секреты не нужны; подписи (Azure Trusted Signing / Apple codesign) —
+# опциональные шаги, см. installer/signing.md и README (macOS).
 name: release
 
 on:
@@ -12,6 +12,60 @@ permissions:
   contents: write
 
 jobs:
+  macos-release:
+    name: macOS DMG (VLESS/SOCKS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/ui/package-lock.json
+
+      # Только darwin-движки: xray (VLESS/REALITY, SOCKS-режим без admin).
+      - name: Fetch pinned VPN engines (darwin)
+        shell: pwsh
+        run: pwsh -File installer/fetch-engines.ps1 -Platform darwin
+
+      # Демон corpvpnd кладётся в бандл: приложение стартует его само
+      # (unix-режим --console), launchd-служба — v0.3.
+      - name: Build corpvpnd daemon
+        run: cargo build --release -p corpvpnd
+
+      - name: Stage daemon into engines dir
+        run: |
+          cp target/release/corpvpnd app/engines/corpvpnd
+          ls -la app/engines
+
+      - name: Build UI deps
+        working-directory: app/ui
+        run: npm install
+
+      # Без подписи Apple: первый запуск — правый клик → Открыть (см. README).
+      - name: Build Tauri app (DMG)
+        working-directory: app
+        run: npx @tauri-apps/cli build --bundles dmg
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          find app/src-tauri/target/release/bundle -type f -name '*.dmg' -exec cp {} dist/ \;
+          ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.dmg
+
   windows-release:
     name: Windows installers (NSIS + MSI)
     runs-on: windows-latest

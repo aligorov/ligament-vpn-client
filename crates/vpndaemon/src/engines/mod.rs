@@ -11,7 +11,6 @@
 
 #[cfg(windows)]
 pub mod openvpn;
-#[cfg(windows)]
 pub mod vless;
 #[cfg(windows)]
 pub mod wireguard;
@@ -72,14 +71,15 @@ pub enum ActiveEngine {
     Wireguard(Box<wireguard::WireguardEngine>),
     #[cfg(windows)]
     Openvpn(Box<openvpn::OpenVpnEngine>),
-    #[cfg(windows)]
     Vless(Box<vless::VlessEngine>),
-    #[cfg(not(windows))]
-    Stub(Box<StubEngine>),
 }
 
 impl ActiveEngine {
     /// Создаёт движок под вид профиля.
+    ///
+    /// На unix VLESS реальный (xray SOCKS, без root); WireGuard/OpenVPN
+    /// требуют драйверов/служб Windows — возвращаем `None`, state отдаст
+    /// пользователю ошибку «только в Windows-сборке».
     #[must_use]
     pub fn for_profile(profile: &Profile) -> Option<Self> {
         match profile.kind {
@@ -87,12 +87,9 @@ impl ActiveEngine {
             ProfileKind::Wireguard => Some(Self::Wireguard(Box::default())),
             #[cfg(windows)]
             ProfileKind::Openvpn => Some(Self::Openvpn(Box::default())),
-            #[cfg(windows)]
             ProfileKind::Vless => Some(Self::Vless(Box::default())),
             #[cfg(not(windows))]
-            ProfileKind::Wireguard | ProfileKind::Openvpn | ProfileKind::Vless => {
-                Some(Self::Stub(Box::default()))
-            }
+            ProfileKind::Wireguard | ProfileKind::Openvpn => None,
         }
     }
 }
@@ -104,10 +101,7 @@ impl VpnEngine for ActiveEngine {
             Self::Wireguard(e) => e.start(ctx).await,
             #[cfg(windows)]
             Self::Openvpn(e) => e.start(ctx).await,
-            #[cfg(windows)]
             Self::Vless(e) => e.start(ctx).await,
-            #[cfg(not(windows))]
-            Self::Stub(e) => e.start(ctx).await,
         }
     }
 
@@ -117,10 +111,7 @@ impl VpnEngine for ActiveEngine {
             Self::Wireguard(e) => e.stop().await,
             #[cfg(windows)]
             Self::Openvpn(e) => e.stop().await,
-            #[cfg(windows)]
             Self::Vless(e) => e.stop().await,
-            #[cfg(not(windows))]
-            Self::Stub(e) => e.stop().await,
         }
     }
 
@@ -130,10 +121,7 @@ impl VpnEngine for ActiveEngine {
             Self::Wireguard(e) => e.stats(),
             #[cfg(windows)]
             Self::Openvpn(e) => e.stats(),
-            #[cfg(windows)]
             Self::Vless(e) => e.stats(),
-            #[cfg(not(windows))]
-            Self::Stub(e) => e.stats(),
         }
     }
 }
@@ -183,36 +171,9 @@ pub fn engine_bin(name: &str) -> Result<PathBuf, EngineError> {
     )))
 }
 
-/// Заглушка для не-Windows сборок (macOS/Linux — фаза 2): «поднимает»
-/// туннель мгновенно и возвращает фиктивную статистику. Позволяет
-/// тестировать RPC/состояния/портал-поток на macOS.
-#[cfg(not(windows))]
-#[derive(Debug, Default)]
-pub struct StubEngine {
-    running: bool,
-}
-
-#[cfg(not(windows))]
-impl VpnEngine for StubEngine {
-    async fn start(&mut self, _ctx: EngineCtx) -> Result<(), EngineError> {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        self.running = true;
-        tracing::info!("StubEngine: туннель «поднят» (не-Windows сборка)");
-        Ok(())
-    }
-
-    async fn stop(&mut self) {
-        self.running = false;
-    }
-
-    fn stats(&self) -> VpnStats {
-        VpnStats {
-            rx_bytes: if self.running { 1024 } else { 0 },
-            tx_bytes: if self.running { 512 } else { 0 },
-            handshake_at: self.running.then(vpncore::model::now_epoch),
-        }
-    }
-}
+// Заглушка удалена: на unix реален VLESS (xray SOCKS), WireGuard/OpenVPN
+// возвращают None из ActiveEngine::for_profile — state отдаёт
+// пользователю ошибку «только в Windows-сборке».
 
 #[cfg(all(test, not(windows)))]
 mod tests {
@@ -220,24 +181,24 @@ mod tests {
     use vpncore::model::{Profile, ProfileKind, ProfileSource};
 
     #[tokio::test]
-    async fn stub_engine_lifecycle() {
-        let mut p = Profile::new("t", ProfileKind::Wireguard, ProfileSource::Import);
-        p.wg = Some(vpncore::model::WgProfile {
+    async fn vless_engine_created_on_unix_others_none() {
+        // VLESS — реальный движок на любой платформе
+        let vless = Profile::new("t", ProfileKind::Vless, ProfileSource::Import);
+        assert!(matches!(
+            ActiveEngine::for_profile(&vless),
+            Some(ActiveEngine::Vless(_))
+        ));
+        // WireGuard/OpenVPN на unix не поддерживаются (драйверы Windows)
+        let mut wg = Profile::new("w", ProfileKind::Wireguard, ProfileSource::Import);
+        wg.wg = Some(vpncore::model::WgProfile {
             config: "[Interface]\nPrivateKey = k\n\n[Peer]\nPublicKey = p\nAllowedIPs = 0.0.0.0/0\n".into(),
         });
-        let engine = ActiveEngine::for_profile(&p).expect("stub на не-Windows");
-        let mut engine = engine;
-        assert!(engine
-            .start(EngineCtx {
-                profile: p,
-                settings: Settings::default(),
-                credentials: None,
-            })
-            .await
-            .is_ok());
-        assert_eq!(engine.stats().rx_bytes, 1024);
-        engine.stop().await;
-        assert_eq!(engine.stats().rx_bytes, 0);
+        assert!(ActiveEngine::for_profile(&wg).is_none());
+        let mut ovpn = Profile::new("o", ProfileKind::Openvpn, ProfileSource::Import);
+        ovpn.ovpn = Some(vpncore::model::OvpnProfile {
+            config: "client\nremote h 1194\n".into(),
+        });
+        assert!(ActiveEngine::for_profile(&ovpn).is_none());
     }
 
     #[test]

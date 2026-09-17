@@ -20,6 +20,7 @@ type Screen = "login" | "main" | "settings" | "logs";
 interface AppState {
   screen: Screen;
   daemonUp: boolean;
+  platform: string;
   state: VpnState;
   profiles: Profile[];
   settings: Settings | null;
@@ -29,6 +30,7 @@ interface AppState {
 
 type Action =
   | { type: "daemon"; up: boolean }
+  | { type: "platform"; platform: string }
   | { type: "screen"; screen: Screen }
   | { type: "state"; state: VpnState }
   | { type: "profiles"; profiles: Profile[] }
@@ -40,6 +42,7 @@ type Action =
 const initialState: AppState = {
   screen: "login",
   daemonUp: true,
+  platform: "windows",
   state: {
     status: "disconnected",
     activeProfileId: null,
@@ -56,6 +59,8 @@ function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
     case "daemon":
       return { ...s, daemonUp: a.up };
+    case "platform":
+      return { ...s, platform: a.platform };
     case "screen":
       return { ...s, screen: a.screen };
     case "state":
@@ -103,9 +108,10 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const { profiles, settings } = await rpc.listProfiles();
+      const { profiles, settings, platform } = await rpc.listProfiles();
       dispatch({ type: "profiles", profiles });
       dispatch({ type: "settings", settings });
+      dispatch({ type: "platform", platform });
       const st = await rpc.getState();
       dispatch({ type: "state", state: st });
       dispatch({ type: "daemon", up: true });

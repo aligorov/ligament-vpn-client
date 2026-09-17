@@ -54,6 +54,9 @@ export function Main() {
 
   const busy = status === "connecting" || status === "disconnecting";
 
+  // На macOS/Linux работает только VLESS (SOCKS-режим): WG/OpenVPN — Windows.
+  const windowsOnly = s.platform !== "windows" && active !== null && active.kind !== "vless";
+
   async function onButton() {
     if (status === "connected") {
       await rpc.disconnect().catch(() => undefined);
@@ -107,7 +110,7 @@ export function Main() {
         <button
           className={`connect-btn status-${status}`}
           onClick={onButton}
-          disabled={busy || (!active && status !== "connected")}
+          disabled={busy || windowsOnly || (!active && status !== "connected")}
           aria-label={
             status === "connected" ? tr("disconnect") : tr("connect")
           }
@@ -150,6 +153,12 @@ export function Main() {
         )}
       </div>
 
+      {windowsOnly && status === "disconnected" && (
+        <div className="error-box">
+          WireGuard и OpenVPN доступны в Windows-сборке. На этой платформе работает профиль VLESS.
+        </div>
+      )}
+
       {s.state.error && status === "error" && (
         <div className="error-box">
           {s.state.error}
@@ -186,7 +195,11 @@ export function Main() {
                 className={`chip ${active?.id === p.id ? "chip-active" : ""}`}
                 onClick={() => setSelected(p.id)}
                 onDoubleClick={() => void doConnect(p.id)}
-                title={p.name}
+                title={
+                  s.platform !== "windows" && p.kind !== "vless"
+                    ? `${p.name} — только в Windows-сборке`
+                    : p.name
+                }
               >
                 <span className="chip-kind">{KIND_LABEL[p.kind]}</span>
                 <span className="chip-name">{p.name}</span>

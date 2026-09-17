@@ -1,12 +1,14 @@
-//! VLESS-движок (Windows): xray.exe (SOCKS-inbound) [+ tun2socks.exe].
+//! VLESS-движок: xray (SOCKS-inbound) [+ tun2socks на Windows].
 //!
 //! - конфиг xray генерируется в vpncore::xray_config (REALITY и т.д.),
 //!   SOCKS слушает `127.0.0.1:{socksPort}` (по умолчанию 10808, спека §2);
-//! - режим «только SOCKS» (`overrides.socksOnly`): поднимается один xray.exe —
+//! - режим «только SOCKS» (`overrides.socksOnly`): поднимается один xray —
 //!   работает вовсе без прав администратора;
-//! - системный режим (по умолчанию): дополнительно tun2socks.exe с устройством
-//!   wintun (`-device wintun -proxy socks5://127.0.0.1:port`), заворачивая
-//!   трафик системы в прокси;
+//! - Windows: системный режим (по умолчанию) дополнительно поднимает
+//!   tun2socks.exe с устройством wintun, заворачивая трафик системы в прокси;
+//! - macOS/Linux: всегда SOCKS-режим (utun требует root/энтитльментов —
+//!   системный режим на unix отложен до v0.3); трафик приложений идёт
+//!   через локальный SOCKS5-прокси `127.0.0.1:{socksPort}`;
 //! - процессы под наблюдением: при падении перезапускаются с паузой 5 с,
 //!   пока движок не остановлен.
 
@@ -20,6 +22,11 @@ use vpncore::model::VpnStats;
 
 /// Пауза перед перезапуском упавшего процесса-сайдкара.
 const RESTART_BACKOFF: Duration = Duration::from_secs(5);
+
+#[cfg(windows)]
+const XRAY_BIN: &str = "xray.exe";
+#[cfg(not(windows))]
+const XRAY_BIN: &str = "xray";
 
 #[derive(Debug, Default)]
 pub struct VlessEngine {
@@ -62,8 +69,8 @@ impl VpnEngine for VlessEngine {
 
         let (stop_tx, stop_rx) = watch::channel(false);
 
-        // xray.exe — локальный SOCKS-прокси
-        let xray_exe = crate::engines::engine_bin("xray.exe")?;
+        // xray — локальный SOCKS-прокси
+        let xray_exe = crate::engines::engine_bin(XRAY_BIN)?;
         let xray_args: Vec<String> = vec![
             "run".into(),
             "-c".into(),
@@ -76,8 +83,10 @@ impl VpnEngine for VlessEngine {
             stop_rx.clone(),
         ));
 
-        // Системный режим: tun2socks поднимает wintun-устройство и гонит
-        // системный трафик в локальный SOCKS. socksOnly — без него (без admin).
+        // Системный режим (только Windows): tun2socks поднимает wintun-устройство
+        // и гонит системный трафик в локальный SOCKS. socksOnly — без него (без admin).
+        // На unix системный режим требует utun+root (v0.3) — всегда SOCKS.
+        #[cfg(windows)]
         if !profile.overrides.socks_only {
             let tun2socks_exe = crate::engines::engine_bin("tun2socks.exe")?;
             let tun2socks_args: Vec<String> = vec![
@@ -92,6 +101,15 @@ impl VpnEngine for VlessEngine {
                 "tun2socks".to_owned(),
                 stop_rx,
             ));
+        }
+        #[cfg(not(windows))]
+        {
+            if !profile.overrides.socks_only {
+                tracing::info!(
+                    "macOS/Linux: системный режим VLESS недоступен — работает SOCKS-прокси 127.0.0.1:{socks_port}"
+                );
+            }
+            let _ = stop_rx; // на unix tun2socks не используется
         }
 
         self.stop_tx = Some(stop_tx);

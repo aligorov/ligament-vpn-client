@@ -9,6 +9,8 @@
 # Параметры:
 #   -LockFile <path>    путь к engine-lock.json (по умолч. рядом со скриптом)
 #   -EnginesDir <path>  куда класть движки (по умолч. <repo>\app\engines)
+#   -Platform <name>    целевая платформа: win | darwin (фильтр по "platforms"
+#                       в engine-lock.json; по умолчанию win)
 #   -AllowUnverified    разрешить артефакты с sha256=null (TODO-пин) —
 #                       только для локальных экспериментов, НЕ для релиза
 #
@@ -18,6 +20,7 @@
 param(
     [string]$LockFile = "",
     [string]$EnginesDir = "",
+    [string]$Platform = "win",
     [switch]$AllowUnverified
 )
 
@@ -60,6 +63,10 @@ foreach ($prop in $lock.engines.PSObject.Properties) {
     $e = $prop.Value
     Write-Host "==> $name $($e.version)"
 
+    if ($e.PSObject.Properties["platforms"] -and $e.platforms -notcontains $Platform) {
+        Write-Host "    пропущен (платформа $($e.platforms -join '/') != $Platform)"
+        continue
+    }
     if (-not $e.url) { Write-Host "    пропущен (нет url)"; continue }
 
     $dest = Join-Path $EnginesDir $e.dest

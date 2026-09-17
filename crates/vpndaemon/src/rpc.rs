@@ -70,6 +70,19 @@ fn rpc_result(id: Option<Value>, result: Value) -> String {
 // Это и есть «таблица диспетчеризации» — единый match по именам методов
 // из спеки §3; дробить её на функции меньше смысла, чем держать в одном месте.
 #[allow(clippy::too_many_lines)]
+/// Строка платформы для UI (какие протоколы доступны в этой сборке).
+fn platform_str() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+/// Таблица методов JSON-RPC: линейный матч по строке метода.
+#[allow(clippy::too_many_lines)]
 pub async fn dispatch(state: &Arc<AppState>, request: &str) -> String {
     let parsed: RpcRequest = match serde_json::from_str(request) {
         Ok(r) => r,
@@ -104,6 +117,8 @@ pub async fn dispatch(state: &Arc<AppState>, request: &str) -> String {
         "corpvpn.profiles.list" => Ok(json!({
             "profiles": state.profiles().await,
             "settings": state.settings().await,
+            // Платформа демона: UI скрывает/блокирует недоступные протоколы
+            "platform": platform_str(),
         })),
 
         "corpvpn.profiles.import" => {
@@ -451,9 +466,30 @@ mod tests {
         assert_eq!(v["id"], "a");
     }
 
+    /// Фейковый xray для реального VLESS-движка на unix (см. state::tests).
+    fn ensure_fake_xray() {
+        use std::sync::OnceLock;
+        static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let dir = DIR.get_or_init(|| {
+            let dir = tempfile::tempdir().unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let xray = dir.path().join("xray");
+                std::fs::write(&xray, "#!/bin/sh\nsleep 3600\n").unwrap();
+                let mut perm = std::fs::metadata(&xray).unwrap().permissions();
+                perm.set_mode(0o755);
+                std::fs::set_permissions(&xray, perm).unwrap();
+            }
+            dir
+        });
+        std::env::set_var("CORPVPN_ENGINE_DIR", dir.path());
+    }
+
     #[tokio::test]
     async fn profiles_import_update_delete_flow() {
         let state = test_state();
+        ensure_fake_xray();
         let wg_conf = "[Interface]\nPrivateKey = k\n\n[Peer]\nPublicKey = p\nAllowedIPs = 0.0.0.0/0\nEndpoint = h:51820\n";
         let resp = dispatch(
             &state,
@@ -489,11 +525,40 @@ mod tests {
         let v: Value = serde_json::from_str(&resp).unwrap();
         assert_eq!(v["result"]["name"], "Переименован");
 
-        // connect через RPC (stub-движок) + disconnect
+        // connect через RPC: WG на unix недоступен — ждём ошибку; рабочий
+        // туннель — через VLESS (фейковый xray из ensure_fake_xray)
         let resp = dispatch(
             &state,
             &format!(
                 r#"{{"jsonrpc":"2.0","id":4,"method":"corpvpn.connect","params":{{"profileId":"{pid}"}}}}"#
+            ),
+        )
+        .await;
+        {
+            let v: Value = serde_json::from_str(&resp).unwrap();
+            #[cfg(not(windows))]
+            assert!(v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Windows-сборке"), "wg на unix должен быть ошибкой: {v}");
+            #[cfg(windows)]
+            assert!(v.get("result").is_some(), "подключение прошло: {v}");
+        }
+        let vless_uri = "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@vpn.example.com:443?security=reality&pbk=pubkey&sid=abcd1234&sni=vpn.example.com&fp=chrome&flow=xtls-rprx-vision&type=tcp#test";
+        let resp = dispatch(
+            &state,
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":40,"method":"corpvpn.profiles.import","params":{{"name":"v","config":{}}}}}"#,
+                serde_json::to_string(vless_uri).unwrap()
+            ),
+        )
+        .await;
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let vpid = v["result"]["id"].as_str().unwrap().to_owned();
+        let resp = dispatch(
+            &state,
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":41,"method":"corpvpn.connect","params":{{"profileId":"{vpid}"}}}}"#
             ),
         )
         .await;

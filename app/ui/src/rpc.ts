@@ -38,8 +38,12 @@ export function isMock(): boolean {
 export const rpc = {
   getState: (): Promise<VpnState> => rawRpc("corpvpn.state.get") as Promise<VpnState>,
 
-  listProfiles: (): Promise<{ profiles: Profile[]; settings: Settings }> =>
-    rawRpc("corpvpn.profiles.list") as Promise<{ profiles: Profile[]; settings: Settings }>,
+  listProfiles: (): Promise<{ profiles: Profile[]; settings: Settings; platform: string }> =>
+    rawRpc("corpvpn.profiles.list") as Promise<{
+      profiles: Profile[];
+      settings: Settings;
+      platform: string;
+    }>,
 
   connect: (profileId: string, creds?: { username?: string; password?: string }): Promise<VpnState> =>
     rawRpc("corpvpn.connect", { profileId, ...creds }) as Promise<VpnState>,
@@ -144,7 +148,7 @@ async function mockRpc(method: string, params?: unknown): Promise<unknown> {
     case "corpvpn.state.get":
       return mockState();
     case "corpvpn.profiles.list":
-      return { profiles: MOCK_PROFILES, settings: mockSettings };
+      return { profiles: MOCK_PROFILES, settings: mockSettings, platform: "windows" };
     case "corpvpn.connect":
       mockStatus = "connecting";
       setTimeout(() => {

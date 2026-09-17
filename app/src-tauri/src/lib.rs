@@ -2,6 +2,64 @@
 pub mod transport;
 pub mod tray;
 
+/// На unix демон живёт в бандле приложения (Resources/engines/corpvpn) и
+/// запускается приложением в консольном режиме — служб/launchd на v0.2 нет.
+#[cfg(not(windows))]
+mod unix_daemon {
+    use std::sync::Mutex;
+
+    static CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
+
+    fn socket_alive() -> bool {
+        std::os::unix::net::UnixStream::connect(crate::transport::SOCK_PATH).is_ok()
+    }
+
+    /// Поднимает демона, если сокет не отвечает.
+    pub fn ensure(app: &tauri::AppHandle) {
+        use tauri::Manager;
+        if socket_alive() {
+            return;
+        }
+        let Ok(res) = app.path().resource_dir() else {
+            return;
+        };
+        let bin = res.join("engines").join("corpvpnd");
+        if !bin.is_file() {
+            eprintln!("corpvpn: демон не найден в бандле: {}", bin.display());
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&bin) {
+                let mut perm = meta.permissions();
+                perm.set_mode(perm.mode() | 0o755);
+                let _ = std::fs::set_permissions(&bin, perm);
+            }
+        }
+        match std::process::Command::new(&bin)
+            .arg("--console")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                *CHILD.lock().unwrap() = Some(child);
+            }
+            Err(e) => eprintln!("corpvpn: не запустить демона {}: {e}", bin.display()),
+        }
+    }
+
+    /// Завершает демона при выходе из приложения.
+    pub fn kill() {
+        if let Some(mut c) = CHILD.lock().unwrap().take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
 use serde_json::Value;
 use tauri::{Manager, WindowEvent};
 
@@ -92,6 +150,10 @@ pub fn run() {
             quit_app
         ])
         .setup(|app| {
+            // unix: поднять демона из бандла, если он ещё не работает
+            #[cfg(not(windows))]
+            unix_daemon::ensure(app.handle());
+
             // Фоновое чтение уведомлений демона → события webview + трей
             transport::spawn_notification_pump(app.handle().clone());
 
@@ -112,6 +174,12 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("ошибка запуска Ligament VPN");
+        .build(tauri::generate_context!())
+        .expect("ошибка сборки Ligament VPN")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                #[cfg(not(windows))]
+                unix_daemon::kill();
+            }
+        });
 }

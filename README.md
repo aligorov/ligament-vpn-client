@@ -55,8 +55,24 @@ OpenID Connect) или логин/пароль портала; конфиги п
 
 Готовые установщики — на странице [Releases][release-link]:
 
-- `LigamentVPN_<версия>_x64-setup.exe` — интерактивная установка (NSIS);
-- `LigamentVPN_<версия>_x64_en-US.msi` — тихая установка/GPO.
+- `Ligament.VPN_<версия>_x64-setup.exe` — Windows, интерактивная установка (NSIS perMachine);
+- `Ligament.VPN_<версия>_aarch64.dmg` — macOS (Apple Silicon).
+
+### macOS
+
+На macOS работает **VLESS (обход блокировок) в SOCKS-режиме** — целиком без
+прав администратора: движок xray поднимает локальный SOCKS5-прокси
+`127.0.0.1:10808` (укажите его в браузере/системных настройках или в
+приложениях). WireGuard и OpenVPN в macOS-сборке недоступны (нужны
+драйверы Windows / NetworkExtension — см. Roadmap): профили видно, но
+подключение честно сообщит об этом.
+
+DMG не подписан Apple Developer ID, поэтому при первом запуске:
+правый клик по приложению → «Открыть», либо терминалом:
+
+```bash
+xattr -cr "/Applications/Ligament VPN.app"
+```
 
 Сторонние движки (OpenVPN, Xray-core, tun2socks, tunnel.dll WireGuard) уже
 внутри пакета: они скачиваются при сборке CI по пиннингу SHA256 из
@@ -108,17 +124,22 @@ vpn_wg_client/
 └── .github/workflows/  # ci.yml, release.yml
 ```
 
-### macOS (разработка UI и vpncore)
+### macOS (разработка UI, vpncore и VLESS-движка)
 
-UI-часть работает с mock-демоном — реальные туннели на macOS не поднимаются
-(фаза 2), весь сетевой код в `cfg(windows)`-крэйтах:
+На macOS полностью работают: vpncore, RPC/транспорт демона (unix-сокет),
+портал-поток (OIDC/синхронизация) и **реальный VLESS-движок** (xray из
+`app/engines/xray/`, качается `pwsh installer/fetch-engines.ps1 -Platform darwin`).
+WireGuard/OpenVPN — только Windows (`cfg(windows)`-модули).
 
 ```bash
-# юнит-тесты ядра
+# юнит-тесты ядра и демона (включая запуск VLESS через фейковый xray)
 cargo test --workspace
 
 # UI в dev-режиме (vite, mock daemon)
 cd app/ui && npm install && npm run dev
+
+# полное приложение (требует engines/ с xray)
+cd app && npx @tauri-apps/cli build --bundles dmg
 ```
 
 ### Windows (полная сборка)
@@ -159,11 +180,15 @@ npx @tauri-apps/cli build --bundles nsis,msi
 
 ## Roadmap
 
-- **Фаза 1 (текущая):** Windows — WireGuard + OpenVPN + VLESS (SOCKS и
+- **Фаза 1 (v0.1):** Windows — WireGuard + OpenVPN + VLESS (SOCKS и
   системный режим), вход OIDC + логин/пароль, ручной импорт, трей,
   GPO/ADMX, CI.
-- **Фаза 2:** macOS (NetworkExtension) и Linux (wg-quick/netdev), kill-switch
-  на WFP, автообновление через updater-плагин Tauri.
+- **Фаза 2 (v0.2, текущая):** macOS — VLESS/SOCKS без прав администратора,
+  полный UI, вход через Ligament 2FA, синхронизация с порталом.
+- **Фаза 3:** macOS NetworkExtension и Linux (wg-quick/netdev) для
+  WireGuard/OpenVPN, системный режим VLESS на unix, kill-switch на WFP,
+  автообновление через updater-плагин Tauri, единый корпоративный MSI
+  (кастомный WiX).
 
 [ci-badge]: https://github.com/YOUR_ORG/vpn_wg_client/actions/workflows/ci.yml/badge.svg
 [ci-link]: https://github.com/YOUR_ORG/vpn_wg_client/actions/workflows/ci.yml
