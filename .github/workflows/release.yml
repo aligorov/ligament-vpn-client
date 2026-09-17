@@ -149,6 +149,40 @@ jobs:
       #     endpoint-url: https://eus.codesigning.azure.net/
       #     files: dist/*
 
+      # БЛОКИРУЮЩИЙ E2E: ставим РЕАЛЬНЫЙ setup.exe молча и проверяем службу.
+      # Релиз НЕ публикуется, пока служба не RUNNING и pipe не отвечает.
+      - name: "E2E: silent install -> service RUNNING -> pipe RPC"
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist/*_x64-setup.exe | Select-Object -First 1).FullName
+          Write-Host "=== silent install: $setup /S ==="
+          $p = Start-Process $setup -ArgumentList "/S" -Wait -PassThru
+          Write-Host "installer exit: $($p.ExitCode)"
+          $ok = $false
+          foreach ($i in 1..30) {
+            $svc = Get-Service CorpVPND -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq 'Running') { $ok = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          sc.exe query CorpVPND
+          sc.exe qc CorpVPND
+          if (-not $ok) {
+            Write-Host "=== CRASH LOG ==="
+            Get-Content "$env:ProgramData\Ligament\CorpVPN\logs\corpvpnd-crash.log" -ErrorAction SilentlyContinue
+            Get-ChildItem "$env:ProgramData\Ligament\CorpVPN\logs" -ErrorAction SilentlyContinue |
+              ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Tail 20 }
+            throw "E2E FAIL: служба CorpVPND не RUNNING после установки setup.exe"
+          }
+          $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'corpvpn-daemon', [System.IO.Pipes.PipeDirection]::InOut)
+          $pipe.Connect(5000)
+          $w = New-Object System.IO.StreamWriter($pipe); $w.AutoFlush = $true
+          $r = New-Object System.IO.StreamReader($pipe)
+          $w.WriteLine('{"jsonrpc":"2.0","id":1,"method":"corpvpn.state.get"}')
+          $resp = $r.ReadLine()
+          Write-Host "PIPE: $resp"
+          if ($resp -notmatch '"status"') { throw "E2E FAIL: pipe RPC не ответил" }
+          Write-Host "E2E OK — служба работает из реального установщика"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

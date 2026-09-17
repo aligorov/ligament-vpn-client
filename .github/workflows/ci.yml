@@ -55,6 +55,44 @@ jobs:
         working-directory: app/src-tauri
         run: cargo check
 
+      # E2E на настоящей Windows-машине: самоустановка службы и RPC.
+      - name: Service e2e (install - RUNNING - pipe RPC - uninstall)
+        shell: pwsh
+        run: |
+          cargo build --release -p corpvpnd
+          $bin = "target\release\corpvpnd.exe"
+          Write-Host "=== install-service ==="
+          & $bin --install-service
+          Write-Host "exit=$LASTEXITCODE"
+          $ok = $false
+          foreach ($i in 1..15) {
+            $svc = Get-Service CorpVPND -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq 'Running') { $ok = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          sc.exe query CorpVPND
+          sc.exe qc CorpVPND
+          if (-not $ok) {
+            Write-Host "=== CRASH LOG ==="
+            Get-Content "$env:ProgramData\Ligament\CorpVPN\logs\corpvpnd-crash.log" -ErrorAction SilentlyContinue
+            Get-ChildItem "$env:ProgramData\Ligament\CorpVPN\logs" -ErrorAction SilentlyContinue |
+              ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Tail 20 }
+            throw "corpvpnd: служба не RUNNING после --install-service"
+          }
+          Write-Host "=== named pipe RPC ==="
+          $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'corpvpn-daemon', [System.IO.Pipes.PipeDirection]::InOut)
+          $pipe.Connect(5000)
+          $w = New-Object System.IO.StreamWriter($pipe); $w.AutoFlush = $true
+          $r = New-Object System.IO.StreamReader($pipe)
+          $w.WriteLine('{"jsonrpc":"2.0","id":1,"method":"corpvpn.state.get"}')
+          $resp = $r.ReadLine()
+          Write-Host $resp
+          if ($resp -notmatch '"status"') { throw "pipe RPC не ответил" }
+          Write-Host "PIPE RPC OK"
+          & $bin --uninstall-service
+          if (Get-Service CorpVPND -ErrorAction SilentlyContinue) { throw "служба не удалена" }
+          Write-Host "E2E OK"
+
   ui:
     name: ui (tsc + vite build)
     runs-on: ubuntu-latest

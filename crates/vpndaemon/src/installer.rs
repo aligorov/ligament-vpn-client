@@ -40,7 +40,27 @@ pub fn install() -> windows_service::Result<()> {
         | ServiceAccess::CHANGE_CONFIG
         | ServiceAccess::START
         | ServiceAccess::DELETE;
-    let service = manager.create_service(&info, service_access)?;
+    // После delete служба может числиться «marked for delete» (1072), пока
+    // старый процесс не умер: создаём с повторами.
+    let mut service = None;
+    let mut last_err = None;
+    for attempt in 0..10 {
+        match manager.create_service(&info, service_access) {
+            Ok(s) => {
+                service = Some(s);
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(Duration::from_millis(500));
+                let _ = attempt;
+            }
+        }
+    }
+    // все попытки провалились — возвращаем последнюю ошибку
+    let Some(service) = service else {
+        return Err(last_err.unwrap());
+    };
     service.set_description(
         "Ligament VPN — служба управления туннелями WireGuard/OpenVPN/VLESS \
          (данные: %PROGRAMDATA%\\Ligament\\CorpVPN)",
