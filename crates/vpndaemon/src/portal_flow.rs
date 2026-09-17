@@ -11,6 +11,9 @@
 //!
 //! issuer/client_id по умолчанию — Ligament (спека §1); переопределяются
 //! параметрами RPC и переменными `CORPVPN_OIDC_ISSUER`/`CORPVPN_OIDC_CLIENT_ID`.
+//! Порт loopback-callback фиксирован (`CORPVPN_OIDC_CALLBACK_PORT`, по
+//! умолчанию 8400): Ligament сверяет redirect_uri точным совпадением и под
+//! случайный порт (`:0`) вход всегда отвергался бы.
 
 use crate::state::{AppState, RpcFailure};
 use std::sync::Arc;
@@ -24,6 +27,9 @@ use vpncore::portal::{PortalClient, PortalProfiles, PortalUser};
 pub const DEFAULT_OIDC_ISSUER: &str = "https://2fa.ligam.org";
 /// client_id «CorpVPN Desktop» регистрируется в настройках Ligament (спека §2).
 pub const DEFAULT_OIDC_CLIENT_ID: &str = "CorpVPN Desktop";
+/// Порт loopback-callback; именно `http://127.0.0.1:8400/cb` регистрируется
+/// в Ligament как redirect_uri (сверка точная — порт обязан быть фиксированным).
+pub const DEFAULT_OIDC_CALLBACK_PORT: u16 = 8400;
 /// Сколько ждать ответа браузера на loopback-сервере.
 const OIDC_CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Страница-ответ на loopback-запрос.
@@ -39,6 +45,16 @@ fn default_client_id(override_value: Option<String>) -> String {
     override_value
         .or_else(|| std::env::var("CORPVPN_OIDC_CLIENT_ID").ok())
         .unwrap_or_else(|| DEFAULT_OIDC_CLIENT_ID.to_owned())
+}
+
+fn parse_callback_port(raw: Option<&str>) -> u16 {
+    raw.and_then(|v| v.trim().parse::<u16>().ok())
+        .filter(|p| *p != 0)
+        .unwrap_or(DEFAULT_OIDC_CALLBACK_PORT)
+}
+
+fn callback_port() -> u16 {
+    parse_callback_port(std::env::var("CORPVPN_OIDC_CALLBACK_PORT").ok().as_deref())
 }
 
 async fn portal_client_for(state: &Arc<AppState>) -> Result<PortalClient, RpcFailure> {
@@ -93,14 +109,12 @@ pub async fn oidc_start(
     let issuer = default_issuer(issuer);
     let client_id = default_client_id(client_id);
 
-    // свободный порт для loopback-redirect
-    let listener = TcpListener::bind("127.0.0.1:0")
+    // Порт фиксирован: redirect_uri сверяется в Ligament точным совпадением,
+    // случайный порт (`:0`) не совпал бы ни с одной регистрацией.
+    let port = callback_port();
+    let listener = TcpListener::bind(("127.0.0.1", port))
         .await
-        .map_err(|e| RpcFailure::new(format!("Не открыть loopback-порт: {e}")))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| RpcFailure::new(e.to_string()))?
-        .port();
+        .map_err(|e| RpcFailure::new(format!("Не открыть loopback-порт {port}: {e}")))?;
 
     let auth = client
         .oidc_prepare(&issuer, &client_id, port)
@@ -379,6 +393,20 @@ mod tests {
             default_issuer(Some("https://custom.idp".into())),
             "https://custom.idp"
         );
+        if std::env::var("CORPVPN_OIDC_CALLBACK_PORT").is_err() {
+            assert_eq!(callback_port(), DEFAULT_OIDC_CALLBACK_PORT);
+        }
+    }
+
+    #[test]
+    fn callback_port_parse() {
+        // валидное значение (с пробелами) применяется, 0 и мусор — нет
+        assert_eq!(parse_callback_port(Some("9000")), 9000);
+        assert_eq!(parse_callback_port(Some(" 9000 ")), 9000);
+        assert_eq!(parse_callback_port(Some("0")), DEFAULT_OIDC_CALLBACK_PORT);
+        assert_eq!(parse_callback_port(Some("не порт")), DEFAULT_OIDC_CALLBACK_PORT);
+        assert_eq!(parse_callback_port(Some("99999")), DEFAULT_OIDC_CALLBACK_PORT);
+        assert_eq!(parse_callback_port(None), DEFAULT_OIDC_CALLBACK_PORT);
     }
 
     use crate::state::AppState;

@@ -67,11 +67,16 @@ fn run_service_loop() -> Result<(), Box<dyn std::error::Error>> {
 
     status_handle.set_service_status(service_status(ServiceState::StartPending))?;
 
-    // поднимаем рантайм: хранилище, журналы, RPC
+    // поднимаем рантайм: хранилище, журналы, RPC.
+    // ВАЖНО: bootstrap_state() внутри делает tokio::spawn — вызывать его
+    // можно только в контексте рантайма (block_on), иначе паника
+    // «there is no reactor running» и служба падает с 1067 на старте
+    // (главная причина неработающей службы во всех версиях до v0.3.0;
+    // поймано e2e-тестом на реальной Windows-машине в CI).
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let state = crate::bootstrap_state()?;
+    let state = runtime.block_on(async { crate::bootstrap_state() })?;
 
     runtime.spawn(crate::rpc::serve(Arc::clone(&state)));
     status_handle.set_service_status(service_status(ServiceState::Running))?;
