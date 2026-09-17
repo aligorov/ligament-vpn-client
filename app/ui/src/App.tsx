@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import type { LogEntry, Profile, Settings, VpnState } from "./types";
-import { rpc, RpcError, subscribeDaemonEvents } from "./rpc";
+import { rpc, isMock, RpcError, subscribeDaemonEvents } from "./rpc";
 import { t, type Lang } from "./i18n";
 import { Login } from "./screens/Login";
 import { Main } from "./screens/Main";
@@ -186,19 +186,13 @@ export default function App() {
 
   if (!s.daemonUp) {
     return (
-      <div className="center-screen">
-        <div className="fatal-title">{tr("daemonDown")}</div>
-        <div className="muted">{tr("daemonDownHint")}</div>
-        <button
-          className="btn btn-primary"
-          onClick={() => {
-            dispatch({ type: "daemon", up: true });
-            void refresh();
-          }}
-        >
-          {tr("retry")}
-        </button>
-      </div>
+      <DaemonDownScreen
+        tr={tr}
+        onRetry={() => {
+          dispatch({ type: "daemon", up: true });
+          void refresh();
+        }}
+      />
     );
   }
 
@@ -218,5 +212,50 @@ export default function App() {
       {s.screen === "settings" && <SettingsScreen />}
       {s.screen === "logs" && <Logs />}
     </AppCtx.Provider>
+  );
+}
+
+function DaemonDownScreen({
+  tr,
+  onRetry,
+}: {
+  tr: (k: Parameters<typeof t>[1]) => string;
+  onRetry: () => void;
+}) {
+  const [diag, setDiag] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function runDiag() {
+    setBusy(true);
+    setDiag(null);
+    try {
+      if (isMock()) {
+        setDiag("Мок-режим: демон не используется.");
+      } else {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const text = await invoke<string>("diagnose_service");
+        setDiag(text || "Диагностика пуста — логов ещё нет.");
+      }
+    } catch (e) {
+      setDiag(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="center-screen">
+      <div className="fatal-title">{tr("daemonDown")}</div>
+      <div className="muted">{tr("daemonDownHint")}</div>
+      <div className="diag-actions">
+        <button className="btn btn-primary" onClick={onRetry}>
+          {tr("retry")}
+        </button>
+        <button className="btn btn-ghost" onClick={runDiag} disabled={busy}>
+          Диагностика
+        </button>
+      </div>
+      {diag && <pre className="diag-box">{diag}</pre>}
+    </div>
   );
 }

@@ -116,6 +116,81 @@ mod unix_daemon {
     }
 }
 
+
+/// Самодиагностика «служба не запущена»: показывает пользователю причину
+/// без обращения к нам (Windows: sc query/qc + crash-лог; macOS: лог спавна).
+#[tauri::command]
+fn diagnose_service() -> String {
+    let mut out = String::new();
+
+    #[cfg(windows)]
+    {
+        for cmd in [
+            format!("sc.exe query {}", "CorpVPND"),
+            format!("sc.exe qc {}", "CorpVPND"),
+        ] {
+            out.push_str(&format!("$ {cmd}\n"));
+            match std::process::Command::new("cmd").args(["/C", &cmd]).output() {
+                Ok(o) => {
+                    out.push_str(&String::from_utf8_lossy(&o.stdout));
+                    out.push_str(&String::from_utf8_lossy(&o.stderr));
+                }
+                Err(e) => out.push_str(&format!("ошибка запуска: {e}\n")),
+            }
+            out.push('\n');
+        }
+        let crash = std::path::PathBuf::from(
+            std::env::var("PROGRAMDATA").unwrap_or_default(),
+        )
+        .join("Ligament")
+        .join("CorpVPN")
+        .join("logs")
+        .join("corpvpnd-crash.log");
+        if crash.is_file() {
+            out.push_str("=== corpvpnd-crash.log ===\n");
+            if let Ok(text) = std::fs::read_to_string(&crash) {
+                let tail: String = text.lines().rev().take(20).collect::<Vec<_>>().join("\n");
+                out.push_str(&tail);
+                out.push('\n');
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let base = std::path::PathBuf::from(&home)
+            .join("Library/Application Support/Ligament/CorpVPN/logs");
+        if let Ok(entries) = std::fs::read_dir(&base) {
+            let mut files: Vec<_> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file())
+                .collect();
+            files.sort();
+            files.reverse(); // свежие ротации первыми
+            let mut shown = 0;
+            for f in files {
+                if shown >= 3 {
+                    break;
+                }
+                let fname = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                if !fname.starts_with("app-daemon") && !fname.starts_with("corpvpnd") {
+                    continue;
+                }
+                out.push_str(&format!("=== {fname} (хвост) ===\n"));
+                if let Ok(text) = std::fs::read_to_string(&f) {
+                    let tail: String = text.lines().rev().take(20).collect::<Vec<_>>().join("\n");
+                    out.push_str(&tail);
+                    out.push('\n');
+                }
+                shown += 1;
+            }
+        }
+    }
+    out
+}
+
 use serde_json::Value;
 use tauri::{Manager, WindowEvent};
 
@@ -203,7 +278,8 @@ pub fn run() {
             open_external,
             pick_config_file,
             set_autostart,
-            quit_app
+            quit_app,
+            diagnose_service
         ])
         .setup(|app| {
             // unix: поднять демона из бандла, если он ещё не работает

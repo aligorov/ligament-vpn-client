@@ -15,6 +15,8 @@
   ; Идемпотентно: демон сам остановит/удалит старую и создаст новую службу,
   ; пропишет автоперезапуск при сбоях (5с/5с/60с) и запустит её.
   nsExec::ExecToLog '"$INSTDIR\engines\corpvpnd.exe" --install-service'
+  ; Результат виден в окне установки (Детали) — служба должна быть RUNNING
+  nsExec::ExecToLog 'sc.exe query CorpVPND'
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

@@ -630,3 +630,12 @@ textarea.input {
 .mono {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
+
+.diag-actions { display: flex; gap: 10px; }
+.diag-box {
+  max-width: 92vw; max-height: 40vh; overflow: auto;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px;
+  font: 12px/1.5 ui-monospace, Menlo, monospace; text-align: left;
+  user-select: text; white-space: pre-wrap;
+}
