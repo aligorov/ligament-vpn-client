@@ -133,7 +133,6 @@ jobs:
           find app/src-tauri/target/release/bundle -type f \
             \( -name '*_x64-setup.exe' -o -name '*_x64*.msi' \) \
             -exec cp {} dist/ \;
-          cp installer/install-service.ps1 dist/
           cp installer/GUIDE-GPO.md dist/
           cp installer/DIAGNOSTICS.md dist/
           ls -la dist/
@@ -157,6 +156,5 @@ jobs:
           files: |
             dist/*_x64-setup.exe
             dist/*_x64*.msi
-            dist/install-service.ps1
             dist/GUIDE-GPO.md
             dist/DIAGNOSTICS.md

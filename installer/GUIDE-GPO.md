@@ -4,9 +4,10 @@
 Client (CorpVPN)** на рабочие станции Windows 10/11 x64 через Active Directory
 Group Policy, без участия пользователя.
 
-Установка — **per-machine** (MSI ставит службу `CorpVPND` и UI для всех
-пользователей машины), ежедневное использование прав администратора не
-требует.
+Установка — **per-machine** (установщик ставит службу `CorpVPND` и UI для
+всех пользователей машины), ежедневное использование прав администратора не
+требует. **Всё встроено в один установщик**: приложение, служба, движки
+(OpenVPN/Xray/tun2socks/WireGuard tunnel.dll) — никаких отдельных скриптов.
 
 ---
 
@@ -14,72 +15,57 @@ Group Policy, без участия пользователя.
 
 | Компонент | Где взять |
 |---|---|
-| `LigamentVPN_<версия>_x64-setup.exe` и `LigamentVPN_<версия>_x64_en-US.msi` | GitHub Releases проекта (раздел Downloads в README) |
+| `Ligament.VPN_<версия>_x64-setup.exe` | GitHub Releases проекта |
 | ADMX/ADML шаблоны | каталог `installer/gpo/` репозитория |
 | Доступ к контроллеру домена | для правки GPO и SYSVOL |
 
-MSI нужен именно **en-US** (нейтральный, без встроенной локализации
-установщика — язык интерфейса выбирает само приложение, русский по
-умолчанию). NSIS `setup.exe` — для ручной установки, GPO работает с MSI.
+## 2. Тихая установка (служба ставится сама)
 
-## 2. Добавление MSI в GPO Software Installation (per-machine)
-
-1. Положите MSI в сетевую папку, доступную **компьютерам** домена на чтение
-   (например, `\\dc01\SYSVOL\corp.example\software\CorpVPN\LigamentVPN_1.0.0_x64_en-US.msi`).
-   Используйте UNC-путь, а не букву диска — установка выполняется от имени
-   учётной записи компьютера.
-2. Откройте **Group Policy Management** → создайте (или выберите) GPO для OU
-   с рабочими станциями → **Edit**.
-3. Перейдите: *Computer Configuration → Policies → Software Settings →
-   Software installation* → ПКМ → **New → Package**.
-4. Выберите MSI по UNC-пути. Метод deploying — **Assigned** (пакет
-   ставится при загрузке компьютера, до входа пользователя).
-5. (Опционально) В свойствах пакета, вкладка *Upgrades*, добавьте предыдущую
-   версию MSI — обновление пройдёт автоматически при следующей политике.
-
-При загрузке станции Windows сам выполнит `msiexec /i <msi> /qn` —
-тихо, без UI. Прервать/отменить установку пользователь не может.
-
-### Ручная тихая установка (для проверки или вне домена)
+Установщик NSIS поддерживает тихий режим `/S` — с правами администратора он
+ставит приложение, **создаёт и запускает службу `CorpVPND`** (самоустановка
+через WinAPI, с политикой восстановления при сбоях):
 
 ```cmd
-msiexec /i LigamentVPN_1.0.0_x64_en-US.msi /qn /l*v %TEMP%\corpvpn-install.log
+Ligament.VPN_0.2.6_x64-setup.exe /S
 ```
 
-Свойства-публичные ключи MSI (можно задать в GPO: свойства пакета →
-*Modifications* через transform .mst, или прямо в командной строке):
+Тихое удаление: `"%ProgramFiles%\Ligament VPN\uninstall.exe" /S`
+(служба останавливается и удаляется автоматически).
 
-| Свойство | Значение по умолчанию | Описание |
-|---|---|---|
-| `PORTALURL` | (пусто) | URL портала, вшивается в настройки по умолчанию |
-| `INSTALL_ENGINES` | `1` | 0 — не ставить движки (для тонких клиентов) |
-
-Пример с трансформом через командную строку:
-
-```cmd
-msiexec /i LigamentVPN_1.0.0_x64_en-US.msi /qn PORTALURL=https://vpn.corp.example
-```
-
-Для GPO предпочтителен `.mst`-трансформ (создаётся в WiX/Orca), чтобы
-значение жило внутри пакета. Но проще всего задавать `PORTALURL` политикой
-ADMX (см. ниже) — политика перекрывает свойство MSI.
-
-### Проверка установки
+Проверка после установки:
 
 ```powershell
-# Служба установлена и запущена
-Get-Service CorpVPND
-# Коды продукта
-Get-WmiObject Win32_Product -Filter "Name LIKE 'Ligament VPN%'"
-# Лог тихой установки
-Select-String -Path "$env:TEMP\corpvpn-install.log" -Pattern "Installation completed"
+Get-Service CorpVPND      # должна быть Running
 ```
 
-Логи самого клиента: `%PROGRAMDATA%\Ligament\CorpVPN\logs\`
-(`corpvpnd.log` — служба, `ui.log` — интерфейс, `engines\*.log` — вывод
-openvpn/xray). Ротация — 5 файлов по 5 МБ.
+## 3. Развертывание в домене
 
-## 3. Административные шаблоны (ADMX/ADML)
+GPO *Software Installation* работает только с MSI; наш пакет — NSIS exe,
+поэтому для домена используйте любой из способов:
+
+**Способ А — startup-скрипт GPO (простой):**
+1. Положите установщик в SYSVOL: `\\dc01\SYSVOL\corp.example\software\CorpVPN\`.
+2. GPO → *Computer Configuration → Policies → Windows Settings → Scripts
+   (Startup)* → добавьте `.cmd`-обёртку:
+
+   ```cmd
+   @echo off
+   if not exist "%ProgramFiles%\Ligament VPN\Ligament VPN.exe" (
+     "\\dc01\SYSVOL\corp.example\software\CorpVPN\Ligament.VPN_0.2.6_x64-setup.exe" /S
+   )
+   ```
+
+   (запуск при загрузке компьютера от SYSTEM; повторная установка — замена
+   файла в SYSVOL и удаление локального условия либо проверка версии)
+3. Привяжите GPO к OU рабочих станций.
+
+**Способ Б — SCCM / Intune / Ansible:** распространяйте `setup.exe` с
+аргументом `/S` как обычное приложение командной строки.
+
+**Единый корпоративный MSI** (для чистого GPO Software Installation с
+апгрейдами) — в плане (v0.3, кастомный WiX-пакет `installer/wix/`).
+
+## 4. Административные шаблоны (ADMX/ADML)
 
 Файлы из `installer/gpo/`:
 
@@ -93,7 +79,7 @@ Ligament CorpVPN* и пишут значения в `HKLM\SOFTWARE\Policies\Liga
 
 | Политика | Тип | Описание |
 |---|---|---|
-| PortalUrl | строка | адрес портала (перекрывает свойство MSI и настройку пользователя) |
+| PortalUrl | строка | адрес портала (перекрывает настройку пользователя) |
 | RequireLogin | dword | запрет работы без входа на портал |
 | Autostart | dword | автозапуск UI при входе в Windows |
 | KillSwitch | dword | блокировка трафика вне туннеля |
@@ -105,9 +91,9 @@ Ligament CorpVPN* и пишут значения в `HKLM\SOFTWARE\Policies\Liga
 Проверка на станции: `gpresult /h report.html` или
 `reg query HKLM\SOFTWARE\Policies\Ligament\CorpVPN`.
 
-## 4. Настройка серверной части
+## 5. Настройка серверной части
 
-### 4.1 Портал (vpn_creator_wireguard)
+### 5.1 Портал (vpn_creator_wireguard)
 
 1. Включите SSO: *Settings → OpenID Connect* — issuer (Ligament), client_id,
    client_secret; включите «Автосоздание пользователей» при необходимости.
@@ -118,7 +104,7 @@ Ligament CorpVPN* и пишут значения в `HKLM\SOFTWARE\Policies\Liga
 3. Токен живёт 30 дней; блокировка пользователя (disabled/NONE) на портале
    мгновенно запрещает все его Bearer-запросы.
 
-### 4.2 Ligament (2fa.ligam.org)
+### 5.2 Ligament (2fa.ligam.org)
 
 Desktop-клиент использует **тот же client_id, что и веб-портал** — отдельный
 клиент создавать не нужно. В настройках клиента Ligament к существующему
@@ -128,29 +114,26 @@ Desktop-клиент использует **тот же client_id, что и в�
 http://127.0.0.1:*/cb
 ```
 
-(петлевой адрес; Ligament поддерживает wildcard-порт. PKCE S256 уже включён
-в поток клиента — секрет не требуется, public client.)
+(петлевой адрес; PKCE S256 уже включён в поток клиента — секрет не требуется,
+public client.)
 
-### 4.3 Движки VPN (engine-lock)
+### 5.3 Движки VPN
 
-Сторонние движки (OpenVPN, Xray-core, tun2socks, tunnel.dll WireGuard) **не
-хранятся в репозитории** — они скачиваются при сборке CI по пиннингу из
-`installer/engine-lock.json` (URL + SHA256) скриптом
-`installer/fetch-engines.ps1` и упаковываются внутрь MSI в каталог
-`engines`. Если нужно собрать MSI самостоятельно — запустите:
+Сторонние движки **уже внутри установщика** (скачиваются CI по пиннингу
+SHA256 из `installer/engine-lock.json` и упаковываются в каталог `engines`
+рядом со службой). Для самостоятельной сборки установщика:
 
 ```powershell
 pwsh -File installer\fetch-engines.ps1   # PowerShell 7+; если нет — winget install Microsoft.PowerShell
 ```
 
-Движки ставятся в `%PROGRAMDATA%\Ligament\CorpVPN\engines` с ACL на
-SYSTEM/Administrators — подмена пользователем невозможна. WireGuardNT-драйвер
-(`wireguard.dll`) уже подписан командой WireGuard — дополнительная подпись
-драйверов не требуется.
+WireGuardNT-драйвер (`wireguard.dll`) уже подписан командой WireGuard —
+дополнительная подпись драйверов не требуется. Подпись установщика —
+см. `installer/signing.md` (Azure Trusted Signing).
 
-## 5. Первый вход пользователя
+## 6. Первый вход пользователя
 
-1. Пользователь запускает CorpVPN (ярлык рабочего стола/меню Пуск).
+1. Пользователь запускает Ligament VPN (ярлык рабочего стола/меню Пуск).
 2. Нажимает «Войти через 2FA (Ligament)» — открывается системный браузер,
    клиент ждёт подтверждение на `http://127.0.0.1:<порт>/cb`.
 3. После входа клиент сам забирает конфиги с портала — вводить адреса серверов
@@ -158,12 +141,12 @@ SYSTEM/Administrators — подмена пользователем невозм
 4. Профили хранятся в `%PROGRAMDATA%\Ligament\CorpVPN\profiles.dat`
    (зашифрован ключом службы; ограничение MVP — один пользователь на машину).
 
-## 6. Частые проблемы
+## 7. Частые проблемы
 
 | Симптом | Причина / решение |
 |---|---|
-| MSI не ставится через GPO | Проверьте: пакет Assigned в *Computer* Configuration (не User), у компьютера есть чтение сетевой папки, смотрите `C:\Windows\debug\UserMode\GPO.log` и eventlog `Application` (MsiInstaller) |
-| Служба CorpVPND не стартует | `sc query CorpVPND`, лог `%PROGRAMDATA%\Ligament\CorpVPN\logs\corpvpnd.log` |
-| «Нет связи с порталом» | Проверьте PortalUrl (политика/свойство MSI), DNS и прокси на станции |
+| Служба CorpVPND не стартует | В приложении кнопка «Диагностика» на экране ошибки покажет `sc query/qc` и crash-лог; либо вручную по `installer/DIAGNOSTICS.md` |
+| Установщик блокируется антивирусом | Defender ASR (событие 1121) блокирует неподписанный exe — добавьте исключение или подпишите (installer/signing.md) |
+| «Нет связи с порталом» | Проверьте PortalUrl (политика), DNS и прокси на станции |
 | SSO-вход не возвращается в клиент | redirect_uri `http://127.0.0.1:*/cb` не добавлен в клиент Ligament |
 | Политики не применяются | `gpupdate /force`, проверьте что ADMX скопирован в центральное хранилище SYSVOL |
