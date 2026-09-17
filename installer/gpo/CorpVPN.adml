@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Русская локализация шаблона Ligament CorpVPN.
+     Размещение: C:\Windows\SYSVOL\domain\Policies\PolicyDefinitions\ru-RU\CorpVPN.adml
+     Английский вариант — файл CorpVPN.en-US.adml (положить в ...\PolicyDefinitions\en-US\
+     с именем CorpVPN.adml). -->
+<policyDefinitionResources xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" revision="1.0" schemaVersion="1.0">
+  <displayName>Шаблон Ligament CorpVPN</displayName>
+  <description>Корпоративные политики VPN-клиента Ligament CorpVPN</description>
+  <resources>
+    <stringTable>
+      <string id="SUPPORTED_CorpVPN_Win10">Windows 10 и новее</string>
+      <string id="CorpVPNCategory">Ligament CorpVPN</string>
+      <string id="CorpVPNCategory_Explain">Политики корпоративного VPN-клиента Ligament CorpVPN. Настройки хранятся в HKLM\SOFTWARE\Policies\Ligament\CorpVPN и перекрывают пользовательские параметры приложения.</string>
+      <string id="PortalUrl">Адрес портала VPN</string>
+      <string id="PortalUrl_Explain">URL портала vpn_creator_wireguard (например, https://vpn.corp.example). Подставляется в клиент автоматически — пользователю не нужно вводить адрес сервера. Если политика отключена, адрес портала задаётся пользователем вручную.</string>
+      <string id="RequireLogin">Требовать вход на портал</string>
+      <string id="RequireLogin_Explain">Запрещает подключение, если пользователь не выполнил вход через портал (SSO Ligament 2FA или логин/пароль). Профили, импортированные вручную, при этом также недоступны.</string>
+      <string id="Autostart">Автозапуск клиента</string>
+      <string id="Autostart_Explain">Запускать UI-клиент CorpVPN автоматически при входе пользователя в Windows (ярлык в автозагрузке). Пользователь не может отключить автозапуск в настройках приложения.</string>
+      <string id="KillSwitch">Kill-switch (блокировка трафика вне туннеля)</string>
+      <string id="KillSwitch_Explain">При активном подключении блокировать весь трафик, который идёт мимо VPN-туннеля. При обрыве туннеля интернет блокируется до восстановления связи.</string>
+      <string id="DisableManualImport">Запретить ручной импорт конфигураций</string>
+      <string id="DisableManualImport_Explain">Запрещает импорт файлов .conf/.ovpn и ссылок vless:// — профили доступны только с корпоративного портала.</string>
+      <string id="DefaultProtocol">Протокол подключения по умолчанию</string>
+      <string id="DefaultProtocol_Explain">Протокол, который клиент использует для новых профилей портала. При значении «Как на портале» берётся предпочитаемый протокол пользователя из настроек портала.</string>
+      <string id="SplitTunnelDefault">AllowedIPs по умолчанию (split tunneling)</string>
+      <string id="SplitTunnelDefault_Explain">Список CIDR через запятую для маршрутов через туннель (например, 10.0.0.0/8,192.168.0.0/16). Значение 0.0.0.0/0 — весь трафик в туннель. Пользователь может изменить список только для текущего профиля, если не включена политика запрета.</string>
+      <string id="Protocol_Auto">Как на портале (авто)</string>
+      <string id="Protocol_WireGuard">WireGuard</string>
+      <string id="Protocol_OpenVPN">OpenVPN</string>
+      <string id="Protocol_Vless">VLESS</string>
+    </stringTable>
+    <presentationTable>
+      <presentation id="CorpVPN_PortalUrl">
+        <textBox refId="PortalUrlEdit">
+          <label>Адрес портала:</label>
+        </textBox>
+      </presentation>
+      <presentation id="CorpVPN_DefaultProtocol">
+        <dropdownList refId="DefaultProtocolDrop" defaultItem="0">Протокол:</dropdownList>
+      </presentation>
+      <presentation id="CorpVPN_SplitTunnelDefault">
+        <textBox refId="SplitTunnelDefaultEdit">
+          <label>AllowedIPs (CIDR через запятую):</label>
+        </textBox>
+      </presentation>
+    </presentationTable>
+  </resources>
+</policyDefinitionResources>

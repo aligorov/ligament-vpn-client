@@ -1,0 +1,74 @@
+# CI: каждый push и PR.
+# Rust-часть гоняется на macOS (быстрые риннеры, кроссплатформенный vpncore),
+# Windows нужен для компиляции cfg(windows)-кода vpndaemon и Tauri-бриджа.
+# Форматирование (cargo fmt) сознательно не блокирует CI.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-macos:
+    name: rust (clippy + test, macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: tests
+        run: cargo test --workspace
+
+  rust-windows:
+    name: rust (check, Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Компиляция Windows-специфики (служба, pipe, движки) — без запуска
+      # тестов: юнит-тесты vpncore уже отработали на macOS.
+      - name: cargo check
+        run: cargo check --workspace
+
+  ui:
+    name: ui (tsc + vite build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/ui/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: typecheck
+        run: npx tsc --noEmit
+
+      - name: build
+        run: npx vite build

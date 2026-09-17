@@ -1,0 +1,20 @@
+Tauri (каркас приложения и установщиков)
+=========================================
+
+Компонент: Tauri 2 (tauri / tauri-build / tauri-cli, NSIS- и WiX-шаблоны
+установщиков) — https://github.com/tauri-apps/tauri
+
+Лицензия: **MIT ИЛИ Apache-2.0** (двойная лицензия, на выбор лицензиата).
+
+CorpVPN распространяет приложение, собранное Tauri, включая сгенерированные
+установщики NSIS/WiX; оба шаблона установщиков также лицензированы
+MIT/Apache-2.0 (специальное разрешение в NOTICE проекта Tauri).
+
+Полные тексты лицензий:
+  - MIT:    https://github.com/tauri-apps/tauri/blob/dev/LICENSE-MIT
+  - Apache-2.0: https://github.com/tauri-apps/tauri/blob/dev/LICENSE-APACHE-2.0
+  - Краткое уведомление о сторонних компонентах Tauri — в NOTICES.md
+    соответствующих crates (crates.io-страницы tauri / tauri-build / tauri-cli)
+
+Copyright (c) 2019-2026 Tauri Contributors / Tauri Programme within The
+Commons Conservancy.

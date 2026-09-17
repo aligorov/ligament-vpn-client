@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ligament CorpVPN — административный шаблон групповых политик.
+     Реестр: HKLM\SOFTWARE\Policies\Ligament\CorpVPN
+     Размещение: C:\Windows\SYSVOL\domain\Policies\PolicyDefinitions\CorpVPN.admx
+     (или %WINDIR%\PolicyDefinitions на локальной машине).
+     Файлы локализации: ru-RU\CorpVPN.adml (русский), en-US\CorpVPN.en-US.adml. -->
+<policyDefinitions xmlns="http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions" revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="corpvpn" namespace="Ligament.Policies.CorpVPN"/>
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0"/>
+  <supportedOn>
+    <definitions>
+      <definition name="SUPPORTED_CorpVPN_Win10" displayName="$(string.SUPPORTED_CorpVPN_Win10)"/>
+    </definitions>
+  </supportedOn>
+  <categories>
+    <category name="LigamentCorpVPN" displayName="$(string.CorpVPNCategory)" explainText="$(string.CorpVPNCategory_Explain)"/>
+  </categories>
+  <policies>
+    <!-- PortalUrl (REG_SZ): адрес портала vpn_creator_wireguard. -->
+    <policy name="CorpVPN_PortalUrl" class="Machine" displayName="$(string.PortalUrl)" explainText="$(string.PortalUrl_Explain)" key="Software\Policies\Ligament\CorpVPN">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <elements>
+        <text id="PortalUrlEdit" valueName="PortalUrl" maxLength="2048"/>
+      </elements>
+    </policy>
+    <!-- RequireLogin (REG_DWORD 1/0): запрет работы без входа на портал. -->
+    <policy name="CorpVPN_RequireLogin" class="Machine" displayName="$(string.RequireLogin)" explainText="$(string.RequireLogin_Explain)" key="Software\Policies\Ligament\CorpVPN" valueName="RequireLogin">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <enabledValue>
+        <decimal value="1"/>
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0"/>
+      </disabledValue>
+    </policy>
+    <!-- Autostart (REG_DWORD 1/0): автозапуск UI при входе пользователя. -->
+    <policy name="CorpVPN_Autostart" class="Machine" displayName="$(string.Autostart)" explainText="$(string.Autostart_Explain)" key="Software\Policies\Ligament\CorpVPN" valueName="Autostart">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <enabledValue>
+        <decimal value="1"/>
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0"/>
+      </disabledValue>
+    </policy>
+    <!-- KillSwitch (REG_DWORD 1/0): блокировать трафик вне туннеля. -->
+    <policy name="CorpVPN_KillSwitch" class="Machine" displayName="$(string.KillSwitch)" explainText="$(string.KillSwitch_Explain)" key="Software\Policies\Ligament\CorpVPN" valueName="KillSwitch">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <enabledValue>
+        <decimal value="1"/>
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0"/>
+      </disabledValue>
+    </policy>
+    <!-- DisableManualImport (REG_DWORD 1/0): запрет ручного импорта конфигов. -->
+    <policy name="CorpVPN_DisableManualImport" class="Machine" displayName="$(string.DisableManualImport)" explainText="$(string.DisableManualImport_Explain)" key="Software\Policies\Ligament\CorpVPN" valueName="DisableManualImport">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <enabledValue>
+        <decimal value="1"/>
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0"/>
+      </disabledValue>
+    </policy>
+    <!-- DefaultProtocol (REG_SZ): протокол по умолчанию. -->
+    <policy name="CorpVPN_DefaultProtocol" class="Machine" displayName="$(string.DefaultProtocol)" explainText="$(string.DefaultProtocol_Explain)" key="Software\Policies\Ligament\CorpVPN">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <elements>
+        <enum id="DefaultProtocolDrop" valueName="DefaultProtocol">
+          <item displayName="$(string.Protocol_Auto)">
+            <value>
+              <string>auto</string>
+            </value>
+          </item>
+          <item displayName="$(string.Protocol_WireGuard)">
+            <value>
+              <string>wireguard</string>
+            </value>
+          </item>
+          <item displayName="$(string.Protocol_OpenVPN)">
+            <value>
+              <string>openvpn</string>
+            </value>
+          </item>
+          <item displayName="$(string.Protocol_Vless)">
+            <value>
+              <string>vless</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
+    <!-- SplitTunnelDefault (REG_SZ): AllowedIPs по умолчанию, CIDR через запятую. -->
+    <policy name="CorpVPN_SplitTunnelDefault" class="Machine" displayName="$(string.SplitTunnelDefault)" explainText="$(string.SplitTunnelDefault_Explain)" key="Software\Policies\Ligament\CorpVPN">
+      <parentCategory ref="LigamentCorpVPN"/>
+      <supportedOn ref="SUPPORTED_CorpVPN_Win10"/>
+      <elements>
+        <text id="SplitTunnelDefaultEdit" valueName="SplitTunnelDefault" maxLength="2048"/>
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>

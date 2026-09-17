@@ -1,0 +1,87 @@
+# Релиз: сборка установщиков Windows (NSIS + MSI) и публикация GitHub Release.
+# Запуск — тегом v* (например, v1.0.0). Публичный репозиторий: для сборки
+# секреты не нужны; подпись Azure Trusted Signing — опциональный шаг
+# (см. installer/signing.md), включается переменными TS_*/AZURE_*.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Windows installers (NSIS + MSI)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/ui/package-lock.json
+
+      # Скачиваем движки по пиннингу installer/engine-lock.json (sha256).
+      - name: Fetch pinned VPN engines
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File installer/fetch-engines.ps1
+
+      # Служба corpvpnd собирается из того же репозитория и кладётся в
+      # app/engines/ — Tauri упакует всё в resources → <install>\engines\.
+      - name: Build corpvpnd service (Rust)
+        run: cargo build --release -p corpvpnd
+
+      - name: Stage service into engines dir
+        shell: powershell
+        run: |
+          Copy-Item target/release/corpvpnd.exe app/engines/corpvpnd.exe -Force
+          Get-ChildItem app/engines
+
+      - name: Build UI deps
+        working-directory: app/ui
+        run: npm install
+
+      - name: Build Tauri app (NSIS + MSI)
+        working-directory: app
+        run: npx @tauri-apps/cli build --bundles nsis,msi
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          find app/src-tauri/target/release/bundle -type f \
+            \( -name 'LigamentVPN_*_x64-setup.exe' -o -name 'LigamentVPN_*_x64*.msi' \) \
+            -exec cp {} dist/ \;
+          cp installer/install-service.ps1 dist/
+          cp installer/GUIDE-GPO.md dist/
+          ls -la dist/
+
+      # Опционально: подпись (см. installer/signing.md). Раскомментировать
+      # после настройки секретов AZURE_TENANT_ID / AZURE_CLIENT_ID /
+      # TS_ACCOUNT_NAME / TS_PROFILE_NAME.
+      # - uses: azure/trusted-signing-action@v0
+      #   with:
+      #     azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+      #     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+      #     trusted-signing-account-name: ${{ secrets.TS_ACCOUNT_NAME }}
+      #     certificate-profile-name: ${{ secrets.TS_PROFILE_NAME }}
+      #     endpoint-url: https://eus.codesigning.azure.net/
+      #     files: dist/*
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/LigamentVPN_*_x64-setup.exe
+            dist/LigamentVPN_*_x64*.msi
+            dist/install-service.ps1
+            dist/GUIDE-GPO.md

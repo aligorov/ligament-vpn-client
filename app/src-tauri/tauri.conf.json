@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ligament VPN",
+  "version": "0.1.0",
+  "identifier": "com.ligament.corpvpn",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../ui run dev",
+    "beforeBuildCommand": "npm --prefix ../ui run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Ligament VPN",
+        "width": 440,
+        "height": 700,
+        "minWidth": 400,
+        "minHeight": 620,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "iconPath": "icons/tray-gray.png",
+      "iconAsTemplate": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/icon.png"],
+    "resources": {
+      "../engines/**/*": "engines/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      },
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    },
+    "shortDescription": "Корпоративный VPN-клиент",
+    "longDescription": "Ligament VPN — корпоративный клиент WireGuard + OpenVPN + VLESS для платформы vpn_creator_wireguard с авторизацией через Ligament 2FA (OpenID Connect)."
+  }
+}

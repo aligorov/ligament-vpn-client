@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English localization of the Ligament CorpVPN template.
+     Deploy as: C:\Windows\SYSVOL\domain\Policies\PolicyDefinitions\en-US\CorpVPN.adml
+     (rename from CorpVPN.en-US.adml to CorpVPN.adml). -->
+<policyDefinitionResources xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" revision="1.0" schemaVersion="1.0">
+  <displayName>Ligament CorpVPN Template</displayName>
+  <description>Administrative template for the Ligament CorpVPN client</description>
+  <resources>
+    <stringTable>
+      <string id="SUPPORTED_CorpVPN_Win10">Windows 10 and later</string>
+      <string id="CorpVPNCategory">Ligament CorpVPN</string>
+      <string id="CorpVPNCategory_Explain">Policies for the Ligament CorpVPN corporate client. Values are stored under HKLM\SOFTWARE\Policies\Ligament\CorpVPN and override per-user application settings.</string>
+      <string id="PortalUrl">VPN portal URL</string>
+      <string id="PortalUrl_Explain">URL of the vpn_creator_wireguard portal (e.g. https://vpn.corp.example). Preconfigured into the client so users do not type the server address. If the policy is disabled, the portal URL is entered manually by the user.</string>
+      <string id="RequireLogin">Require portal sign-in</string>
+      <string id="RequireLogin_Explain">Forbids connecting unless the user is signed in to the portal (Ligament 2FA SSO or username/password). Manually imported profiles are also unavailable in this mode.</string>
+      <string id="Autostart">Start the client automatically</string>
+      <string id="Autostart_Explain">Launch the CorpVPN UI automatically at user logon (Startup shortcut). The user cannot turn autostart off in the app settings.</string>
+      <string id="KillSwitch">Kill switch (block traffic outside the tunnel)</string>
+      <string id="KillSwitch_Explain">While connected, block all traffic that bypasses the VPN tunnel. If the tunnel drops, network access is blocked until it is restored.</string>
+      <string id="DisableManualImport">Disable manual profile import</string>
+      <string id="DisableManualImport_Explain">Forbids importing .conf/.ovpn files and vless:// links — profiles are available from the corporate portal only.</string>
+      <string id="DefaultProtocol">Default connection protocol</string>
+      <string id="DefaultProtocol_Explain">Protocol the client uses for new portal profiles. With "Same as portal" the user's preferred protocol from the portal settings is used.</string>
+      <string id="SplitTunnelDefault">Default AllowedIPs (split tunneling)</string>
+      <string id="SplitTunnelDefault_Explain">Comma-separated CIDR list routed through the tunnel (e.g. 10.0.0.0/8,192.168.0.0/16). Use 0.0.0.0/0 to tunnel all traffic.</string>
+      <string id="Protocol_Auto">Same as portal (auto)</string>
+      <string id="Protocol_WireGuard">WireGuard</string>
+      <string id="Protocol_OpenVPN">OpenVPN</string>
+      <string id="Protocol_Vless">VLESS</string>
+    </stringTable>
+    <presentationTable>
+      <presentation id="CorpVPN_PortalUrl">
+        <textBox refId="PortalUrlEdit">
+          <label>Portal URL:</label>
+        </textBox>
+      </presentation>
+      <presentation id="CorpVPN_DefaultProtocol">
+        <dropdownList refId="DefaultProtocolDrop" defaultItem="0">Protocol:</dropdownList>
+      </presentation>
+      <presentation id="CorpVPN_SplitTunnelDefault">
+        <textBox refId="SplitTunnelDefaultEdit">
+          <label>AllowedIPs (comma-separated CIDRs):</label>
+        </textBox>
+      </presentation>
+    </presentationTable>
+  </resources>
+</policyDefinitionResources>

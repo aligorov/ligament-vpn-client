@@ -1,0 +1,48 @@
+[package]
+name = "corpvpnd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Служба Windows corpvpnd: pipe RPC, оркестрация движков WireGuard/OpenVPN/VLESS"
+
+[[bin]]
+name = "corpvpnd"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+aes-gcm = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+vpncore = { path = "../vpncore" }
+
+# Зависимости только для Windows: не тянем их в сборку под macOS/Linux.
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_Services",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

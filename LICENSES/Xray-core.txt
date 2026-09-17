@@ -1,0 +1,22 @@
+Xray-core (xray.exe, geoip.dat, geosite.dat)
+=============================================
+
+Компонент: Xray-core, Windows x64, официальные релизы
+https://github.com/XTLS/Xray-core (артефакт пиннован в
+installer/engine-lock.json).
+
+Лицензия: **Mozilla Public License 2.0 (MPL-2.0)**.
+
+CorpVPN распространяет xray.exe **немодифицированным** и не создаёт
+производных работ на его основе; MPL-2.0 разрешает распространение
+немодифицированного исполняемого файла при сохранении этого уведомления и
+доступности исходного кода по ссылке ниже.
+
+Полный текст лицензии:
+  https://www.mozilla.org/en-US/MPL/2.0/
+  https://github.com/XTLS/Xray-core/blob/main/LICENSE
+
+Исходный код:
+  https://github.com/XTLS/Xray-core
+
+Copyright (c) XTLS и участники проекта Xray.

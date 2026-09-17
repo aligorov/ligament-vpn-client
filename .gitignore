@@ -1,0 +1,35 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node / UI
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Tauri
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+
+# Скачанные движки (CI/локально, см. installer/engine-lock.json);
+# README оставляем — Tauri требует непустой каталог ресурсов для cargo check
+app/engines/*
+!app/engines/README.md
+
+# Установщики и двоичники — артефакты сборки, не исходники
+*.msi
+*.exe
+*.wixpdb
+*.nupkg
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Локальные секреты/конфиги
+.env
+.env.local

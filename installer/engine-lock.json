@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Пиннинг сторонних VPN-движков для сборки CorpVPN (см. installer/fetch-engines.ps1).",
+    "Движки НЕ хранятся в репозитории: CI скачивает их по этим URL и проверяет sha256.",
+    "Обновление версии: поднять version+url, пересчитать sha256 (curl -L <url> | shasum -a 256),",
+    "прогнать installer/fetch-engines.ps1 и закоммитить. Лицензии — в LICENSES/."
+  ],
+  "engines": {
+    "openvpn": {
+      "version": "2.7.7-I001",
+      "url": "https://build.openvpn.net/downloads/releases/OpenVPN-2.7.7-I001-amd64.msi",
+      "sha256": "9069a48397c4fd4135fb9c9baea4863c74a465651f67e55a423a433e503100bb",
+      "sha256_note": "Хэш получен 2026-09-17 сборкой из range-чанков (сервер троттлит соединения до ~16KB): размер побайтово совпал с Content-Length 5865472, OLE-структура MSI валидна (Subject: OpenVPN 2.7.7-I001 amd64, WiX 3.14, время сборки совпадает с Last-Modified). Первый CI-раннер с быстрым каналом перепроверит его автоматом при fetch-engines.ps1.",
+      "format": "msi",
+      "extract": "msiexec /a <msi> /qn TARGETDIR=<dir> — взять <dir>/OpenVPN/bin/* (openvpn.exe + libcrypto/libssl/lz4/dco) в engines/openvpn/",
+      "license": "GPL-2.0 с OpenSSL linking exception (двоичник не модифицируется)",
+      "dest": "openvpn"
+    },
+    "xray": {
+      "version": "v26.3.27",
+      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-windows-64.zip",
+      "sha256": "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad",
+      "format": "zip",
+      "extract": "Expand-Archive: xray.exe + geoip.dat + geosite.dat в engines/xray/",
+      "license": "MPL-2.0",
+      "dest": "xray"
+    },
+    "tun2socks": {
+      "version": "v2.7.0",
+      "url": "https://github.com/xjasonlyu/tun2socks/releases/download/v2.7.0/tun2socks-windows-amd64.zip",
+      "sha256": "c5d46e9452f6c9cc7c15ab9158d6d6a0169ceecd6bca019ce476b49337d2be43",
+      "format": "zip",
+      "extract": "Expand-Archive: tun2socks.exe (+ wintun.dll в архиве) в engines/tun2socks/",
+      "license": "MIT",
+      "dest": "tun2socks"
+    },
+    "wireguard": {
+      "version": "1.1",
+      "url": "https://download.wireguard.com/windows-client/wireguard-amd64-1.1.msi",
+      "sha256": "6daa5d37a9e2950dfb8c48b95ab8e562cb2bad1c785d020f38f97bea4c6a5566",
+      "format": "msi",
+      "extract": "msiexec /a <msi> /qn TARGETDIR=<dir> — взять tunnel.dll (embeddable WireGuard Tunnel Library, внутри уже есть подписанный WireGuardNT-драйвер wireguard.dll) в engines/wireguard/. NOTE: отдельный embeddable-dll-service-*.zip с download.wireguard.com больше не публикуется (проверено 2026-09), официальный MSI — тот же артефакт от команды WireGuard, подписан.",
+      "license": "WireGuard for Windows — MIT; wireguard.dll — Prebuilt Binaries License",
+      "dest": "wireguard"
+    },
+    "wireguard-src": {
+      "version": "v1.1",
+      "url": "https://github.com/WireGuard/wireguard-windows/archive/refs/tags/v1.1.tar.gz",
+      "sha256": "2819493071e2e5990e3b282f1ae319fe690b90f2afb1d06935b6eac1345174b8",
+      "format": "tar.gz",
+      "extract": "Опционально: сборка embeddable-dll-service из исходников (Go + MinGW: make в embeddable-dll-service/) как альтернатива извлечению tunnel.dll из MSI",
+      "license": "MIT",
+      "dest": "wireguard-src"
+    }
+  }
+}

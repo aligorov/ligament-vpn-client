@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CorpVPN — WiX v4/v6 фрагмент: служба corpvpnd.exe + sidecar-движки + ProgramData.
+
+  Подключается к основному пакету (Product.wxs / bundle) через ComponentGroup
+  Ref="CorpVPNDServiceComponents". Соглашения о путях (переменные препроцессора):
+    $(var.PublishDir)  — вывод `tauri build` / cargo build --release (corpvpnd.exe)
+    $(var.EnginesDir)  — app/engines (заполняется installer/fetch-engines.ps1)
+
+  Примечание про restart-on-failure: таблицы MSI не покрывают SERVICE_FAILURE_
+  ACTIONS, а custom action по решению не используется — политику перезапуска
+  служба применяет сама при старте (ChangeServiceConfig2) либо администратор
+  один раз выполняет:
+    sc.exe failure CorpVPND reset= 86400 actions= restart/5000/restart/5000/restart/5000
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- Структура ProgramData: %PROGRAMDATA%\Ligament\CorpVPN\{logs,profiles}.
+       ACL по умолчанию для ProgramData наследуется от C:\ProgramData (Users:
+       CreateDir/Append только) — для ключей службы явно закрываем доступ,
+       оставляя SYSTEM и Administrators. -->
+  <Fragment>
+    <StandardDirectory Id="ProgramDataFolder">
+      <Directory Id="LigamentDataDir" Name="Ligament">
+        <Directory Id="CorpVpnDataDir" Name="CorpVPN">
+          <Directory Id="CorpVpnLogsDir" Name="logs" />
+          <Directory Id="CorpVpnProfilesDir" Name="profiles" />
+          <Directory Id="CorpVpnEnginesDir" Name="engines" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="CorpVPNDServiceComponents" Directory="INSTALLFOLDER">
+
+      <!-- === Служба CorpVPND === -->
+      <!-- corpvpnd.exe (Rust, windows-service crate): named pipe
+           \\.\pipe\corpvpn-daemon, оркестрация движков. LocalSystem — нужен
+           для создания служб WireGuardTunnel$<id> и управления маршрутами. -->
+      <Component Id="CorpVPNDExe" Guid="PUT-GUID-HERE-1">
+        <File Id="CorpVPNDExeFile" Source="$(var.PublishDir)\corpvpnd.exe" KeyPath="yes" />
+        <ServiceInstall
+            Id="CorpVPNDService"
+            Name="CorpVPND"
+            DisplayName="Ligament CorpVPN Daemon"
+            Description="Фоновая служба корпоративного VPN-клиента Ligament CorpVPN: управление туннелями WireGuard/OpenVPN/VLESS, named-pipe RPC для UI."
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal"
+            Vital="yes">
+          <!-- SDDL: запуск/управление — только LocalSystem и Administrators. -->
+          <SDDL>D:(A;;CCLCSWRPLORC;;;SY)(A;;CCDCLCSWRPLORC;;;BA)</SDDL>
+        </ServiceInstall>
+        <ServiceControl
+            Id="CorpVPNDControl"
+            Name="CorpVPND"
+            Start="install"
+            Stop="both"
+            Remove="uninstall"
+            Wait="yes" />
+      </Component>
+
+      <!-- === Sidecar-движки (ProgramData, только SYSTEM/Administrators) === -->
+      <!-- tunnel.dll — Embeddable WireGuard Tunnel Library (MIT, подписан
+           командой WireGuard вместе с встроенным WireGuardNT-драйвером). -->
+      <Component Id="WireGuardTunnelDll" Guid="PUT-GUID-HERE-2" Directory="CorpVpnEnginesDir">
+        <File Id="TunnelDll" Source="$(var.EnginesDir)\wireguard\tunnel.dll" KeyPath="yes" />
+        <CreateFolder>
+          <util:PermissionEx User="[WIX_ACCOUNT_LOCALSYSTEM]" GenericAll="yes" />
+          <util:PermissionEx User="[WIX_ACCOUNT_ADMINISTRATORS]" GenericAll="yes" />
+        </CreateFolder>
+      </Component>
+
+      <!-- openvpn.exe + libcrypto/libssl/... — распаковываются из MSI OpenVPN
+           (installer/engine-lock.json). heat.exe-харвест каталога bin:
+             heat dir "$(var.EnginesDir)\openvpn" -cg CorpVPNOpenVPNFiles -dr CorpVpnEnginesDir -var var.EnginesDir -gg -sfrag -srd -o openvpn-files.wxs -->
+      <Component Id="OpenVpnExe" Guid="PUT-GUID-HERE-3" Directory="CorpVpnEnginesDir">
+        <File Id="OpenVpnExeFile" Source="$(var.EnginesDir)\openvpn\openvpn.exe" KeyPath="yes" />
+      </Component>
+      <ComponentRef Id="CorpVPNOpenVPNFiles" />
+
+      <!-- xray.exe (MPL-2.0) + geoip.dat/geosite.dat -->
+      <Component Id="XrayExe" Guid="PUT-GUID-HERE-4" Directory="CorpVpnEnginesDir">
+        <File Id="XrayExeFile" Source="$(var.EnginesDir)\xray\xray.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="XrayGeoip" Guid="PUT-GUID-HERE-5" Directory="CorpVpnEnginesDir">
+        <File Id="XrayGeoipFile" Source="$(var.EnginesDir)\xray\geoip.dat" KeyPath="yes" />
+      </Component>
+      <Component Id="XrayGeosite" Guid="PUT-GUID-HERE-6" Directory="CorpVpnEnginesDir">
+        <File Id="XrayGeositeFile" Source="$(var.EnginesDir)\xray\geosite.dat" KeyPath="yes" />
+      </Component>
+
+      <!-- tun2socks.exe (MIT) + wintun.dll из его архива -->
+      <Component Id="Tun2socksExe" Guid="PUT-GUID-HERE-7" Directory="CorpVpnEnginesDir">
+        <File Id="Tun2socksExeFile" Source="$(var.EnginesDir)\tun2socks\tun2socks.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="WintunDll" Guid="PUT-GUID-HERE-8" Directory="CorpVpnEnginesDir">
+        <File Id="WintunDllFile" Source="$(var.EnginesDir)\tun2socks\wintun.dll" KeyPath="yes" />
+      </Component>
+
+      <!-- === Каталоги данных с ACL === -->
+      <!-- profiles: сюда служба кладёт зашифрованный profiles.dat — доступ
+           обычным пользователям закрыт (читает только служба от SYSTEM). -->
+      <Component Id="CorpVpnProfilesDirC" Guid="PUT-GUID-HERE-9" Directory="CorpVpnProfilesDir">
+        <CreateFolder>
+          <util:PermissionEx User="[WIX_ACCOUNT_LOCALSYSTEM]" GenericAll="yes" />
+          <util:PermissionEx User="[WIX_ACCOUNT_ADMINISTRATORS]" GenericAll="yes" />
+        </CreateFolder>
+      </Component>
+      <!-- logs: чтение службой и админами; UI читает логи через RPC службы. -->
+      <Component Id="CorpVpnLogsDirC" Guid="PUT-GUID-HERE-10" Directory="CorpVpnLogsDir">
+        <CreateFolder>
+          <util:PermissionEx User="[WIX_ACCOUNT_LOCALSYSTEM]" GenericAll="yes" />
+          <util:PermissionEx User="[WIX_ACCOUNT_ADMINISTRATORS]" GenericAll="yes" />
+        </CreateFolder>
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+</Wix>

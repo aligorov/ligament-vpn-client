@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = ["crates/vpncore", "crates/vpndaemon"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+base64 = "0.22"
+aes-gcm = "0.10"
+rand = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "s"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Продуктовые имена (OpenVPN, WireGuard, xray) в русских док-комментариях —
+# без принудительных обратных кавычек.
+doc_markdown = "allow"
+# Системный код: касты проверяются вручную там, где возможна потеря.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
