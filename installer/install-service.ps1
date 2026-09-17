@@ -1,4 +1,4 @@
-# install-service.ps1 — регистрация службы CorpVPND (запускать ОДИН раз от администратора).
+﻿# install-service.ps1 — регистрация службы CorpVPND (запускать ОДИН раз от администратора).
 #
 # После установки приложения (LigamentVPN_x64-setup.exe / .msi) выполните:
 #   powershell -ExecutionPolicy Bypass -File install-service.ps1

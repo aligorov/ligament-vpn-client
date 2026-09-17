@@ -1,4 +1,4 @@
-# fetch-engines.ps1 — скачивание сторонних VPN-движков для сборки CorpVPN.
+﻿# fetch-engines.ps1 — скачивание сторонних VPN-движков для сборки CorpVPN.
 #
 # Читает installer/engine-lock.json (пиннинг: URL + SHA256), скачивает каждый
 # артефакт, проверяет хэш и раскладывает в app/engines/<name> — этот каталог
