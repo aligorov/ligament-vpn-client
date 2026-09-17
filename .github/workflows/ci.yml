@@ -96,7 +96,13 @@ jobs:
           if ($r1 -notmatch '"status"' -or $r2 -notmatch '"status"') { throw "pipe RPC: кто-то из клиентов не ответил (PIPE_BUSY?)" }
           Write-Host "PIPE RPC OK (2 клиента)"
           & $bin --uninstall-service
-          if (Get-Service CorpVPND -ErrorAction SilentlyContinue) { throw "служба не удалена" }
+          # SCM держит объект службы «marked for delete» пару секунд
+          $gone = $false
+          foreach ($i in 1..15) {
+            if (-not (Get-Service CorpVPND -ErrorAction SilentlyContinue)) { $gone = $true; break }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $gone) { throw "служба не удалена за 15 с" }
           Write-Host "E2E OK"
 
   ui:
