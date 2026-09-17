@@ -13,6 +13,22 @@
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    // Самоустановка службы (инсталлятор/GPO): без sc.exe и его цитирования.
+    if args.iter().any(|a| a == "--install-service") {
+        if let Err(e) = corpvpnd::installer::install() {
+            eprintln!("corpvpnd --install-service: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--uninstall-service") {
+        if let Err(e) = corpvpnd::installer::uninstall() {
+            eprintln!("corpvpnd --uninstall-service: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // Режим туннельной службы WireGuard (см. engines::wireguard)
     if let Some(pos) = args.iter().position(|a| a.eq_ignore_ascii_case("/wg-tunnel")) {
         let conf = args

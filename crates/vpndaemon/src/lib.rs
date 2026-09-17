@@ -24,6 +24,8 @@ pub mod rpc;
 pub mod state;
 
 #[cfg(windows)]
+pub mod installer;
+#[cfg(windows)]
 pub mod service;
 
 /// Имя службы Windows. ДОЛЖНО совпадать с регистрацией в SCM буква-в-букву

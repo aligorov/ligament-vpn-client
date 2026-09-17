@@ -2,8 +2,10 @@
 pub mod transport;
 pub mod tray;
 
-/// На unix демон живёт в бандле приложения (Resources/engines/corpvpn) и
-/// запускается приложением в консольном режиме — служб/launchd на v0.2 нет.
+/// На unix демон живёт в бандле приложения (Resources/engines/corpvpnd) и
+/// запускается приложением в консольном режиме. Все ошибки спавна пишем в
+/// ~/Library/Application Support/Ligament/CorpVPN/logs/app-daemon.log —
+/// иначе экран «Служба CorpVPN не запущена» не диагностируем.
 #[cfg(not(windows))]
 mod unix_daemon {
     use std::sync::Mutex;
@@ -14,18 +16,59 @@ mod unix_daemon {
         std::os::unix::net::UnixStream::connect(crate::transport::SOCK_PATH).is_ok()
     }
 
-    /// Поднимает демона, если сокет не отвечает.
+    fn log(msg: &str) {
+        use std::io::Write;
+        let dir = std::env::var("HOME")
+            .map(|h| {
+                std::path::PathBuf::from(h)
+                    .join("Library/Application Support/Ligament/CorpVPN/logs")
+            })
+            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+        let _ = std::fs::create_dir_all(&dir);
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("app-daemon.log"))
+        {
+            let _ = writeln!(f, "{msg}");
+        }
+        eprintln!("corpvpn-app: {msg}");
+    }
+
+    /// Поднимает демона, если сокет не отвечает (в фоне: ждём сокет до 5 с,
+    /// один повтор — старт с холодного диска бывает медленным).
     pub fn ensure(app: &tauri::AppHandle) {
         use tauri::Manager;
         if socket_alive() {
             return;
         }
-        let Ok(res) = app.path().resource_dir() else {
+        let res = app.path().resource_dir();
+        std::thread::spawn(move || ensure_blocking(res));
+    }
+
+    fn ensure_blocking(res: Result<std::path::PathBuf, tauri::Error>) {
+        let Ok(res) = res else {
+            log("resource_dir недоступен");
             return;
         };
         let bin = res.join("engines").join("corpvpnd");
+        log(&format!(
+            "запуск демона: {} (существует: {})",
+            bin.display(),
+            bin.is_file()
+        ));
         if !bin.is_file() {
-            eprintln!("corpvpn: демон не найден в бандле: {}", bin.display());
+            // Показываем реальную раскладку — ловим ошибки размещения ресурсов.
+            match std::fs::read_dir(res.join("engines")) {
+                Ok(entries) => {
+                    let names: Vec<String> = entries
+                        .flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect();
+                    log(&format!("engines/ содержит: {names:?}"));
+                }
+                Err(e) => log(&format!("каталог engines не читается: {e}")),
+            }
             return;
         }
         #[cfg(unix)]
@@ -37,17 +80,30 @@ mod unix_daemon {
                 let _ = std::fs::set_permissions(&bin, perm);
             }
         }
-        match std::process::Command::new(&bin)
-            .arg("--console")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            Ok(child) => {
-                *CHILD.lock().unwrap() = Some(child);
+        for attempt in 1..=2u32 {
+            match std::process::Command::new(&bin)
+                .arg("--console")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(child) => {
+                    *CHILD.lock().unwrap() = Some(child);
+                }
+                Err(e) => {
+                    log(&format!("попытка {attempt}: спавн не удался: {e} ({e:?})"));
+                    continue;
+                }
             }
-            Err(e) => eprintln!("corpvpn: не запустить демона {}: {e}", bin.display()),
+            for _ in 0..50 {
+                if socket_alive() {
+                    log("демон поднялся, сокет отвечает");
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            log(&format!("попытка {attempt}: демон не поднял сокет за 5 с"));
         }
     }
 

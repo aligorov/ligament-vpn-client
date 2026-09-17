@@ -44,6 +44,16 @@ jobs:
           cp target/release/corpvpnd app/engines/corpvpnd
           ls -la app/engines
 
+      # Tauri подписывает только главный бинарник/фреймворки, НЕ Resources:
+      # неподписанный вложенный бинарник на arm64 убивается ядром ПОСЛЕ exec
+      # (spawn возвращает Ok — ошибка невидима). Подписываем все исполняемые.
+      - name: Ad-hoc sign nested binaries
+        run: |
+          chmod +x app/engines/corpvpnd app/engines/xray/xray
+          codesign --force --sign - app/engines/corpvpnd
+          codesign --force --sign - app/engines/xray/xray
+          codesign -dv app/engines/corpvpnd 2>&1 | head -2
+
       - name: Build UI deps
         working-directory: app/ui
         run: npm install
@@ -58,6 +68,7 @@ jobs:
           mkdir -p dist
           find app/src-tauri/target/release/bundle -type f -name '*.dmg' -exec cp {} dist/ \;
           cp installer/Enable-LigamentVPN.command dist/
+          cp installer/DIAGNOSTICS.md dist/
           ls -la dist/
 
       - name: Create GitHub Release
@@ -67,6 +78,7 @@ jobs:
           files: |
             dist/*.dmg
             dist/Enable-LigamentVPN.command
+            dist/DIAGNOSTICS.md
 
   windows-release:
     name: Windows installers (NSIS + MSI)
@@ -123,6 +135,7 @@ jobs:
             -exec cp {} dist/ \;
           cp installer/install-service.ps1 dist/
           cp installer/GUIDE-GPO.md dist/
+          cp installer/DIAGNOSTICS.md dist/
           ls -la dist/
 
       # Опционально: подпись (см. installer/signing.md). Раскомментировать
@@ -146,3 +159,4 @@ jobs:
             dist/*_x64*.msi
             dist/install-service.ps1
             dist/GUIDE-GPO.md
+            dist/DIAGNOSTICS.md

@@ -1,7 +1,10 @@
 ; NSIS-хуки Ligament VPN (Tauri 2: bundle.windows.nsis.installerHooks).
-; perMachine-инсталлятор запускается с правами администратора — регистрируем
-; службу CorpVPND прямо в установке, чтобы пользователю не нужно было
-; ничего делать вручную (v0.1.0 требовал отдельный install-service.ps1).
+; perMachine-инсталлятор запускается с правами администратора.
+;
+; Службу ставит САМ демон (`corpvpnd --install-service`, CreateServiceW с
+; корректным цитированием пути). Никакого `sc.exe create` из скриптов:
+; цитирование binPath с пробелами («C:\Program Files\...») через
+; NSIS/PowerShell ломалось на каждом слое, и служба не стартовала.
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Каталог данных (ACL ставит служба, но создаём заранее)
@@ -9,20 +12,12 @@
   CreateDirectory "$COMMONPROGRAMDATA\Ligament\CorpVPN\logs"
   CreateDirectory "$COMMONPROGRAMDATA\Ligament\CorpVPN\tunnels"
 
-  ; Идемпотентно: останавливаем и пересоздаём службу (апгрейд поверх старой)
-  nsExec::ExecToLog 'sc.exe stop CorpVPND'
-  nsExec::ExecToLog 'sc.exe delete CorpVPND'
-  nsExec::ExecToLog 'sc.exe create CorpVPND binPath= "\"$INSTDIR\engines\corpvpnd.exe\"" start= auto obj= LocalSystem DisplayName= "CorpVPN Daemon (Ligament)"'
-  nsExec::ExecToLog 'sc.exe description CorpVPND "Ligament VPN — служба управления туннелями WireGuard/OpenVPN/VLESS"'
-  ; Автоперезапуск при сбоях: 5с/5с/60с, сброс счётчика раз в сутки
-  nsExec::ExecToLog 'sc.exe failure CorpVPND reset= 86400 actions= restart/5000/restart/5000/restart/60000'
-  ; Зависимости Nsi/TcpIp нужны туннельным службам WireGuardTunnel$*
-  ; (их создаёт сам демон), службе-демону они не требуются.
-  nsExec::ExecToLog 'sc.exe start CorpVPND'
+  ; Идемпотентно: демон сам остановит/удалит старую и создаст новую службу,
+  ; пропишет автоперезапуск при сбоях (5с/5с/60с) и запустит её.
+  nsExec::ExecToLog '"$INSTDIR\engines\corpvpnd.exe" --install-service'
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  nsExec::ExecToLog 'sc.exe stop CorpVPND'
-  nsExec::ExecToLog 'sc.exe delete CorpVPND'
+  nsExec::ExecToLog '"$INSTDIR\engines\corpvpnd.exe" --uninstall-service'
   ; Данные (профили/логи) не трогаем — только службу.
 !macroend
