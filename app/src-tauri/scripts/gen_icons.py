@@ -94,3 +94,47 @@ write_png(os.path.join(OUT, "tray-gray.png"), 32, 32, circle(32, GRAY))
 write_png(os.path.join(OUT, "tray-yellow.png"), 32, 32, circle(32, YELLOW))
 write_png(os.path.join(OUT, "tray-green.png"), 32, 32, circle(32, GREEN))
 print("done")
+
+# --- icon.ico (мультисайзовый, PNG-записи; см. отдельный генератор в истории) ---
+# ICO уже сгенерирован и закоммичен (16..256); при необходимости пересоздания
+# используйте: python3 - <<'PY'  (тот же алгоритм, что в CI-фиксе 2026-09-17)
+import io
+
+def _load_rgba(path):
+    data = open(path, "rb").read()
+    pos, idat, w = 8, b"", 0
+    while pos < len(data):
+        ln = int.from_bytes(data[pos:pos+4], "big")
+        tag = data[pos+4:pos+8]
+        if tag == b"IHDR":
+            w, h = int.from_bytes(data[pos+8:pos+12], "big"), int.from_bytes(data[pos+12:pos+16], "big")
+        elif tag == b"IDAT":
+            idat += data[pos+8:pos+8+ln]
+        pos += 12 + ln
+    raw = zlib.decompress(idat)
+    px, stride = [], w * 4 + 1
+    for y in range(h):
+        row = raw[y*stride+1:(y+1)*stride]
+        px.append([list(row[x*4:(x+1)*4]) for x in range(w)])
+    return w, h, px
+
+def _png_bytes(w, h, px):
+    raw = b"".join(b"\x00" + b"".join(bytes(p) for p in row) for row in px)
+    def ch(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + ch(b"IDAT", zlib.compress(raw, 9)) + ch(b"IEND", b""))
+
+_W, _H, _PX = _load_rgba(os.path.join(OUT, "icon.png"))
+_imgs = []
+for _s in (16, 24, 32, 48, 64, 128, 256):
+    _d = [[_PX[min(_H-1, y*_H//_s)][min(_W-1, x*_W//_s)] for x in range(_s)] for y in range(_s)]
+    _imgs.append((_s, _png_bytes(_s, _s, _d)))
+_hdr = struct.pack("<HHH", 0, 1, len(_imgs))
+_dir, _blob, _off = b"", b"", 6 + 16 * len(_imgs)
+for _s, _b in _imgs:
+    _dir += struct.pack("<BBBBHHII", _s % 256, _s % 256, 0, 0, 1, 32, len(_b), _off)
+    _blob += _b
+    _off += len(_b)
+open(os.path.join(OUT, "icon.ico"), "wb").write(_hdr + _dir + _blob)
+print("ok:", os.path.join(OUT, "icon.ico"))

@@ -43,6 +43,11 @@ jobs:
         shell: powershell
         run: |
           Copy-Item target/release/corpvpnd.exe app/engines/corpvpnd.exe -Force
+          # wireguard-src — исходники для самостоятельной сборки tunnel.dll;
+          # в пакет не идут (tunnel.dll извлекается из официального MSI).
+          if (Test-Path app/engines/wireguard-src) {
+            Remove-Item app/engines/wireguard-src -Recurse -Force
+          }
           Get-ChildItem app/engines
 
       - name: Build UI deps
