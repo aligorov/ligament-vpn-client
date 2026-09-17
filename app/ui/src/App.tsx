@@ -143,6 +143,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.booted]);
 
+  // Автоповтор, пока демон не отвечает (стартует из бандла ~1-2 с)
+  useEffect(() => {
+    if (s.daemonUp && s.booted) return;
+    if (!s.booted) return;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [s.daemonUp, s.booted, refresh]);
+
   // Подписка на события демона (state.changed / log.entry)
   useEffect(() => {
     let unsub: (() => void) | undefined;

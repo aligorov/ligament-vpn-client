@@ -6,9 +6,8 @@
 //! - `/wg-tunnel <conf>`: режим службы туннеля WireGuard — binPath-цель,
 //!   загружает tunnel.dll и вызывает экспорт WireGuardTunnelService.
 //!
-//! Не-Windows: печает сообщение и завершается (спека — Windows-first,
-//! macOS/Linux — фаза 2); RPC доступен через библиотечный
-//! `corpvpnd::run_console()` и тесты.
+//! macOS/Linux: приложение Tauri запускает нас в консольном режиме
+//! (без SCM/launchd — фаза 3), поднимаем RPC на unix-сокете.
 
 #[cfg(windows)]
 fn main() {
@@ -44,7 +43,16 @@ fn main() {
 
 #[cfg(not(windows))]
 fn main() {
-    // Фаза 2 (спека §10): macOS/Linux-демон. RPC-сервер для разработки
-    // доступен как библиотека corpvpnd::run_console().
-    println!("corpvpnd: только Windows (см. спеку, фаза 2)");
+    // macOS/Linux: единственный режим — консольный RPC-сервер. Приложение
+    // стартует нас само (app/src-tauri unix_daemon::ensure); раньше здесь
+    // был заглушка «только Windows», из-за которой сокет не поднимался
+    // и UI показывал «Служба CorpVPN не запущена» (баг v0.2.0–v0.2.2).
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    if let Err(e) = runtime.block_on(corpvpnd::run_console()) {
+        eprintln!("corpvpnd: {e}");
+        std::process::exit(1);
+    }
 }
