@@ -65,7 +65,27 @@ fn run_service_loop() -> Result<(), Box<dyn std::error::Error>> {
     };
     let status_handle = service_control_handler::register(crate::SERVICE_NAME, event_handler)?;
 
-    status_handle.set_service_status(service_status(ServiceState::StartPending))?;
+    // StartPending с wait_hint и тикающим checkpoint: на машинах с АВ старт
+    // может идти секунды — без этого мониторинги видят «зависшую» службу.
+    {
+        let mut pending = service_status(ServiceState::StartPending);
+        pending.wait_hint = Duration::from_secs(30);
+        status_handle.set_service_status(pending)?;
+    }
+    let checkpoint_handle = status_handle;
+    let ticker = std::thread::spawn(move || {
+        let mut cp = 1u32;
+        while cp < 30 {
+            std::thread::sleep(Duration::from_secs(1));
+            let mut pending = service_status(ServiceState::StartPending);
+            pending.checkpoint = cp;
+            pending.wait_hint = Duration::from_secs(30);
+            if checkpoint_handle.set_service_status(pending).is_err() {
+                break;
+            }
+            cp += 1;
+        }
+    });
 
     // поднимаем рантайм: хранилище, журналы, RPC.
     // ВАЖНО: bootstrap_state() внутри делает tokio::spawn — вызывать его
@@ -78,7 +98,14 @@ fn run_service_loop() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let state = runtime.block_on(async { crate::bootstrap_state() })?;
 
-    runtime.spawn(crate::rpc::serve(Arc::clone(&state)));
+    // остановить checkpoint-тикер: переводом в Running SCM сам завершает фазу
+    drop(ticker);
+    let serve_state = Arc::clone(&state);
+    runtime.spawn(async move {
+        if let Err(e) = crate::rpc::serve(serve_state).await {
+            tracing::error!(error = %e, "RPC-сервер остановился с ошибкой");
+        }
+    });
     status_handle.set_service_status(service_status(ServiceState::Running))?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "служба corpvpnd запущена");
 

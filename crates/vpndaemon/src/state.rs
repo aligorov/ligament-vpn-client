@@ -95,7 +95,18 @@ impl AppState {
                 portal_user: None,
             },
             Err(vpncore::store::StoreError::Io(_)) => SharedData::default(), // первого старта ещё нет
-            Err(e) => return Err(format!("Хранилище профилей: {e}")),
+            // Битое/чужое хранилище (апгрейд с другой версией ключа, сбой
+            // записи, карантина АВ): изолируем файл и стартуем с пустого —
+            // служба обязана подниматься (аудит #1; раньше — краш-цикл).
+            Err(e @ (vpncore::store::StoreError::Crypto | vpncore::store::StoreError::Serialize)) => {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let path = store.path();
+                let _ = std::fs::rename(&path, path.with_extension(format!("corrupt-{ts}")));
+                tracing::error!(error = %e, "хранилище не читается — изолировано, начато с пустого");
+                SharedData::default()
+            }
         };
         // политики HKLM перекрывают пользовательские настройки (спека §5)
         apply_policies(&mut data.settings, &policy.read());

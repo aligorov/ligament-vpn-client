@@ -25,7 +25,7 @@ pub const PIPE_NAME: &str = r"\\.\pipe\corpvpn-daemon";
 pub const UNIX_SOCKET_PATH: &str = "/tmp/corpvpn-daemon.sock";
 /// SDDL канала: интерактивные пользователи + администраторы, без сети.
 #[cfg(windows)]
-const PIPE_SDDL: &str = "D:P(A;;GA;;;AU)(A;;GA;;;BA)";
+const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019f;;;IU)";
 
 /// Лимит длины строки запроса (защита от зацикливания на мусоре).
 const MAX_LINE_LEN: usize = 4 * 1024 * 1024;
@@ -334,6 +334,7 @@ where
 /// (клиентов может быть много одновременно), подключённые экземпляры
 /// обслуживаются в отдельных задачах.
 #[cfg(windows)]
+#[allow(clippy::unused_async)] // сигнатура единая с serve_unix
 async fn serve_pipe(state: Arc<AppState>) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
@@ -348,6 +349,12 @@ async fn serve_pipe(state: Arc<AppState>) -> std::io::Result<()> {
         std::ptr::from_mut(attrs) as usize
     };
 
+    // Канонический accept-loop: connect выполняется В СПАВНЕННОЙ задаче,
+    // а цикл сразу создаёт следующий слушающий instance. Иначе между
+    // accept'ами нет ни одного слушателя и второй клиент приложения
+    // (RPC + насос событий стартуют одновременно) ловит ERROR_PIPE_BUSY,
+    // который UI показывал как «Служба CorpVPN не запущена» (аудит #4).
+    let mut instance = 0u64;
     loop {
         let options = ServerOptions::new();
         // SAFETY: addr указывает на SECURITY_ATTRIBUTES, которая живёт
@@ -358,13 +365,19 @@ async fn serve_pipe(state: Arc<AppState>) -> std::io::Result<()> {
                 attrs_addr as *mut std::ffi::c_void,
             )
         }?;
-        // ждём клиента; параллельно готовим следующий instance
-        server.connect().await?;
-        let connected = server;
+        instance += 1;
         let state_clone = Arc::clone(&state);
+        let n = instance;
         tokio::spawn(async move {
-            handle_connection(connected, state_clone).await;
+            if let Err(e) = server.connect().await {
+                tracing::debug!(instance = n, error = %e, "pipe instance закрыт");
+                return;
+            }
+            handle_connection(server, state_clone).await;
         });
+        if instance == 1 {
+            tracing::info!("RPC сервер на named pipe {PIPE_NAME}");
+        }
     }
 }
 

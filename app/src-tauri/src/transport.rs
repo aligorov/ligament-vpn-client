@@ -30,9 +30,31 @@ async fn roundtrip(id: u64, req_line: &str) -> Result<Value, String> {
     use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
 
-    let pipe = ClientOptions::new()
-        .open(PIPE_PATH)
-        .map_err(|_| DAEMON_ERR.to_string())?;
+    // ERROR_PIPE_BUSY (231): все instance'ы заняты — это НЕ «служба не
+    // запущена»; ждём освобождения (аудит #4).
+    let mut pipe = None;
+    let mut last_err = None;
+    for _ in 0..25 {
+        match ClientOptions::new().open(PIPE_PATH) {
+            Ok(p) => {
+                pipe = Some(p);
+                break;
+            }
+            Err(e) if e.raw_os_error() == Some(231) => {
+                last_err = Some(e);
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            Err(_) => return Err(DAEMON_ERR.to_string()),
+        }
+    }
+    let pipe = match pipe {
+        Some(p) => p,
+        None => {
+            return Err(format!(
+                "Канал службы занят (все соединения используются): {last_err:?}"
+            ))
+        }
+    };
     let (rx, mut tx) = tokio::io::split(pipe);
     tx.write_all(req_line.as_bytes())
         .await
@@ -69,10 +91,13 @@ async fn read_response<R: tokio::io::AsyncRead + Unpin>(
     let mut line = String::new();
     for _ in 0..50 {
         line.clear();
-        let n = reader
-            .read_line(&mut line)
-            .await
-            .map_err(|_| "Чтение из службы".to_string())?;
+        let n = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            reader.read_line(&mut line),
+        )
+        .await
+        .map_err(|_| "Служба не ответила за 5 с".to_string())?
+        .map_err(|_| "Чтение из службы".to_string())?;
         if n == 0 || line.trim().is_empty() {
             return Err(DAEMON_ERR.into());
         }

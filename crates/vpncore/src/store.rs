@@ -57,6 +57,12 @@ impl EncryptedFileStore {
         Self { path: path.into(), key }
     }
 
+    /// Путь файла хранилища (для изоляции повреждённого файла).
+    #[must_use]
+    pub fn path(&self) -> PathBuf {
+        self.path.clone()
+    }
+
     fn cipher(&self) -> Aes256Gcm {
         Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key))
     }
@@ -112,19 +118,35 @@ impl ProfileStore for EncryptedFileStore {
 /// см. спека §6.
 pub fn load_or_create_key(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     use rand::RngCore;
-    use std::io::Read;
+
     if path.exists() {
-        let mut file = std::fs::File::open(path)?;
-        let mut key = [0u8; 32];
-        file.read_exact(&mut key)?;
-        return Ok(key);
+        let data = std::fs::read(path)?;
+        if data.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&data);
+            return Ok(key);
+        }
+        // Обрезанный/битый ключ (сбой записи при первом старте): старым ключом
+        // хранилище всё не расшифровать — изолируем ОБА файла и начинаем заново
+        // (аудит #3: раньше это был фатальный краш-цикл службы).
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let _ = std::fs::rename(path, path.with_extension(format!("corrupt-{ts}")));
+        if let Some(dir) = path.parent() {
+            let store = dir.join("profiles.dat");
+            let _ = std::fs::rename(&store, store.with_extension(format!("corrupt-{ts}")));
+        }
     }
     let mut key = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut key);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(path, key)?;
+    // атомарно: tmp + rename (как в save())
+    let tmp = path.with_extension("key.tmp");
+    std::fs::write(&tmp, key)?;
+    std::fs::rename(&tmp, path)?;
     Ok(key)
 }
 

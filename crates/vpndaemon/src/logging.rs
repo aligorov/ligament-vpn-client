@@ -124,7 +124,22 @@ pub fn init(logs_dir: &Path, events: broadcast::Sender<String>) {
     let _ = std::fs::create_dir_all(logs_dir);
     cleanup_old_logs(logs_dir, 7);
 
-    let appender = tracing_appender::rolling::daily(logs_dir, "corpvpnd.log");
+    // Файловый аппендер может не создаться (АВ держит файл, диск, ACL) —
+    // служба обязана стартовать и без файла: builder возвращает Err, а не panic.
+    let appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("corpvpnd.log")
+        .build(logs_dir)
+        .unwrap_or_else(|e| {
+            eprintln!("corpvpnd: файловый лог недоступен ({e}) — логи только в UI-канале");
+            tracing_appender::rolling::RollingFileAppender::builder()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("corpvpnd.log")
+                .build(std::env::temp_dir().join("corpvpn-fallback"))
+                .unwrap_or_else(|_| {
+                    tracing_appender::rolling::never(std::env::temp_dir(), "corpvpnd-fallback.log")
+                })
+        });
     let tee = TeeMakeWriter {
         file: Arc::new(std::sync::Mutex::new(appender)),
         tx: events,

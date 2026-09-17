@@ -9,11 +9,72 @@
 
 use std::ffi::OsString;
 use std::time::Duration;
+use std::io::Write as _;
 use windows_service::service::{
     ServiceAccess, ServiceAction, ServiceActionType, ServiceErrorControl, ServiceFailureActions,
     ServiceFailureResetPeriod, ServiceInfo, ServiceStartType, ServiceState, ServiceType,
 };
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+/// SDDL службы: SY/BA — полный доступ; интерактивные пользователи (IU) —
+/// только QUERY/START/STOP/INTERROGATE. Без CHANGE_CONFIG — это privesc.
+/// Даёт кнопке «Запустить службу» в приложении работать БЕЗ прав админа.
+const SERVICE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;LCSWRPWPLOCRRC;;;IU)";
+
+fn install_log(msg: &str) {
+    // UTF-8 лог в ProgramData: stdout через nsExec превращается в кракозябры
+    // (OEM-кодировка NSIS), а diagnosтика нужна читаемой (аудит #10).
+    let dir = std::env::var("PROGRAMDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
+        .join("Ligament")
+        .join("CorpVPN")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("install.log"))
+    {
+        let _ = writeln!(f, "{msg}");
+    }
+    println!("{msg}");
+}
+
+/// Прописывает DACL службы (интерактивные пользователи: start/stop/query).
+fn set_service_dacl(manager: &ServiceManager) -> windows_service::Result<()> {
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::Win32::System::Services::SetServiceObjectSecurity;
+    use windows::core::PCWSTR;
+    use windows_service::service::ServiceAccess;
+
+    let service = manager.open_service(crate::SERVICE_NAME, ServiceAccess::ALL_ACCESS)?;
+    let wide: Vec<u16> = SERVICE_SDDL.encode_utf16().chain([0]).collect();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: wide — NUL-терминированная строка; дескриптор освобождения не
+    // требует (время жизни процесса установки).
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(wide.as_ptr()),
+            SDDL_REVISION_1,
+            std::ptr::from_mut(&mut sd),
+            None,
+        )
+        .map_err(|e| windows_service::Error::Winapi(std::io::Error::other(e)))?;
+        // raw_handle() у крейта — windows-sys (isize); WinAPI-функция ждёт
+        // обёртку windows 0.58 — конвертируем явно.
+        let handle = windows::Win32::System::Services::SC_HANDLE(
+            service.raw_handle() as *mut core::ffi::c_void,
+        );
+        SetServiceObjectSecurity(handle, DACL_SECURITY_INFORMATION, sd)
+            .map_err(|e| windows_service::Error::Winapi(std::io::Error::other(e)))?;
+    }
+    install_log("DACL службы обновлён (интерактивные пользователи: старт/стоп)");
+    Ok(())
+}
 
 /// Создаёт (или пересоздаёт при апгрейде) службу CorpVPND и запускает её.
 pub fn install() -> windows_service::Result<()> {
@@ -29,7 +90,11 @@ pub fn install() -> windows_service::Result<()> {
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
-        executable_path: std::env::current_exe().unwrap_or_else(|_| "corpvpnd.exe".into()),
+        executable_path: std::env::current_exe().map_err(|e| {
+            windows_service::Error::Winapi(std::io::Error::other(format!(
+                "не определить путь corpvpnd.exe: {e}"
+            )))
+        })?,
         launch_arguments: vec![],
         dependencies: vec![],
         account_name: None, // LocalSystem
@@ -44,22 +109,32 @@ pub fn install() -> windows_service::Result<()> {
     // старый процесс не умер: создаём с повторами.
     let mut service = None;
     let mut last_err = None;
-    for attempt in 0..10 {
+    for _ in 0..10 {
         match manager.create_service(&info, service_access) {
             Ok(s) => {
                 service = Some(s);
                 break;
             }
+            // ретрай только против гонки marked-for-delete (аудит #10);
+            // остальные ошибки (доступ и пр.) не «рассосутся»
             Err(e) => {
+                let code = match &e {
+                    windows_service::Error::Winapi(io) => io.raw_os_error(),
+                    _ => None,
+                };
                 last_err = Some(e);
+                if code != Some(1072) {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(500));
-                let _ = attempt;
             }
         }
     }
     // все попытки провалились — возвращаем последнюю ошибку
     let Some(service) = service else {
-        return Err(last_err.unwrap());
+        let e = last_err.unwrap();
+        install_log(&format!("create_service: {e}"));
+        return Err(e);
     };
     service.set_description(
         "Ligament VPN — служба управления туннелями WireGuard/OpenVPN/VLESS \
@@ -88,8 +163,14 @@ pub fn install() -> windows_service::Result<()> {
     };
     service.update_failure_actions(failure_actions)?;
 
+    // Без DACL служба после сбоя поднимается только админом (аудит #5).
+    if let Err(e) = set_service_dacl(&manager) {
+        // не фатально: служба работает, но старт из приложения — только с админом
+        install_log(&format!("set_service_dacl: {e} (не фатально)"));
+    }
+
     service.start::<std::ffi::OsString>(&[])?;
-    println!("Служба {} установлена и запущена", crate::SERVICE_NAME);
+    install_log(&format!("Служба {} установлена и запущена", crate::SERVICE_NAME));
     Ok(())
 }
 

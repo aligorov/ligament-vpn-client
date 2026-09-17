@@ -154,6 +154,45 @@ fn diagnose_service() -> String {
                 out.push('\n');
             }
         }
+
+        // Антивирус: ASR-правило «блокировать непопулярные exe» — главный
+        // корпоративный убийца неподписанной службы (события 1121/1122).
+        let ps = |script: &str| -> String {
+            match std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", script])
+                .output()
+            {
+                Ok(o) => {
+                    let mut s = String::from_utf8_lossy(&o.stdout).into_owned();
+                    s.push_str(&String::from_utf8_lossy(&o.stderr));
+                    s
+                }
+                Err(e) => format!("powershell недоступен: {e}"),
+            }
+        };
+        out.push_str("=== Defender: блокировки наших файлов (1121/1122) ===\n");
+        let blocks = ps(
+            "Get-WinEvent -LogName 'Microsoft-Windows-Windows-Defender/Operational' -MaxEvents 300 | \
+             Where-Object { $_.Id -in 1121,1122 } | \
+             Where-Object { $_.Message -match 'corpvpnd|xray|tun2socks|openvpn|Ligament' } | \
+             Select-Object -First 5 | Format-List TimeCreated, Id",
+        );
+        if blocks.trim().is_empty() {
+            out.push_str("(блокировок не найдено)\n");
+        } else {
+            out.push_str(&blocks);
+        }
+        out.push_str("=== SCM: события CorpVPND (System log) ===\n");
+        let scm = ps(
+            "Get-WinEvent -LogName System -MaxEvents 100 | \
+             Where-Object { $_.ProviderName -eq 'Service Control Manager' -and $_.Message -match 'CorpVPND' } | \
+             Select-Object -First 5 | Format-List TimeCreated, Id",
+        );
+        if scm.trim().is_empty() {
+            out.push_str("(событий SCM нет)\n");
+        } else {
+            out.push_str(&scm);
+        }
     }
 
     #[cfg(not(windows))]
@@ -189,6 +228,101 @@ fn diagnose_service() -> String {
         }
     }
     out
+}
+
+
+/// Запуск службы CorpVPND ИЗ ПРИЛОЖЕНИЯ с полным логом попытки.
+/// Работает без прав администратора, если DACL службы разрешает
+/// интерактивным пользователям START (прописывает --install-service).
+/// Возвращает построчный транскрипт — UI показывает его пользователю.
+#[tauri::command]
+fn start_service() -> String {
+    let mut log: Vec<String> = Vec::new();
+    let ts = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    };
+
+    #[cfg(windows)]
+    {
+        let run = |cmd: &str| -> String {
+            match std::process::Command::new("cmd").args(["/C", cmd]).output() {
+                Ok(o) => {
+                    let mut s = String::from_utf8_lossy(&o.stdout).into_owned();
+                    s.push_str(&String::from_utf8_lossy(&o.stderr));
+                    s
+                }
+                Err(e) => format!("ошибка запуска команды: {e}"),
+            }
+        };
+
+        log.push(format!("[{}] проверка состояния службы", ts()));
+        let q = run("sc.exe query CorpVPND");
+        log.push(q.trim().to_owned());
+
+        if q.contains("RUNNING") {
+            log.push("служба уже RUNNING".into());
+        } else if q.contains("1060") {
+            log.push(
+                "СЛУЖБА НЕ УСТАНОВЛЕНА (1060) — запустите установщик Ligament.VPN_x64-setup.exe".into(),
+            );
+            return log.join("\n");
+        } else {
+            log.push(format!("[{}] запуск: sc start CorpVPND", ts()));
+            let st = run("sc.exe start CorpVPND");
+            log.push(st.trim().to_owned());
+            if st.contains("1053") {
+                log.push("1053: процесс не отчитался вовремя — смотри crash-лог ниже".into());
+            }
+            if st.contains("5 ") || st.to_lowercase().contains("access is denied") {
+                log.push(
+                    "ОТКАЗ ДОСТУПА: старт запрещён. Либо DACL службы, либо антивирус —                      смотри раздел Defender ниже"
+                        .into(),
+                );
+            }
+        }
+
+        // ждём named pipe до 10 с
+        log.push(format!("[{}] ожидание канала \\\\.\\pipe\\corpvpn-daemon (до 10 с)", ts()));
+        #[allow(clippy::cast_possible_truncation)]
+        for i in 1..=20u32 {
+            if pipe_alive_windows() {
+                log.push("КАНАЛ ОТВЕЧАЕТ — служба поднялась".into());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if i == 20 {
+                log.push("канал так и не появился".into());
+            }
+        }
+
+        // crash-лог
+        let crash = std::path::PathBuf::from(
+            std::env::var("PROGRAMDATA").unwrap_or_default(),
+        )
+        .join("Ligament")
+        .join("CorpVPN")
+        .join("logs")
+        .join("corpvpnd-crash.log");
+        if crash.is_file() {
+            log.push("=== corpvpnd-crash.log ===".into());
+            if let Ok(text) = std::fs::read_to_string(&crash) {
+                let tail: String = text.lines().rev().take(15).collect::<Vec<_>>().join("\n");
+                log.push(tail);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    log.push("Запуск службы из приложения — только в Windows-сборке.".into());
+
+    log.join("\n")
+}
+
+#[cfg(windows)]
+fn pipe_alive_windows() -> bool {
+    std::fs::metadata(r"\\.\\pipe\\corpvpn-daemon").is_ok()
 }
 
 use serde_json::Value;
@@ -279,7 +413,8 @@ pub fn run() {
             pick_config_file,
             set_autostart,
             quit_app,
-            diagnose_service
+            diagnose_service,
+            start_service
         ])
         .setup(|app| {
             // unix: поднять демона из бандла, если он ещё не работает

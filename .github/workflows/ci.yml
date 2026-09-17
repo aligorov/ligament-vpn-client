@@ -79,16 +79,22 @@ jobs:
               ForEach-Object { "=== $($_.Name) ==="; Get-Content $_.FullName -Tail 20 }
             throw "corpvpnd: служба не RUNNING после --install-service"
           }
-          Write-Host "=== named pipe RPC ==="
-          $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'corpvpn-daemon', [System.IO.Pipes.PipeDirection]::InOut)
-          $pipe.Connect(5000)
-          $w = New-Object System.IO.StreamWriter($pipe); $w.AutoFlush = $true
-          $r = New-Object System.IO.StreamReader($pipe)
-          $w.WriteLine('{"jsonrpc":"2.0","id":1,"method":"corpvpn.state.get"}')
-          $resp = $r.ReadLine()
-          Write-Host $resp
-          if ($resp -notmatch '"status"') { throw "pipe RPC не ответил" }
-          Write-Host "PIPE RPC OK"
+          Write-Host "=== named pipe RPC: два одновременных клиента ==="
+          function New-PipeClient {
+            $p = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'corpvpn-daemon', [System.IO.Pipes.PipeDirection]::InOut)
+            $p.Connect(5000)
+            ,@($p, (New-Object System.IO.StreamWriter($p)), (New-Object System.IO.StreamReader($p)))
+          }
+          $c1 = New-PipeClient
+          $c2 = New-PipeClient   # одновременно с первым: раньше ловили ERROR_PIPE_BUSY
+          $c1[1].AutoFlush = $true; $c2[1].AutoFlush = $true
+          $c1[1].WriteLine('{"jsonrpc":"2.0","id":1,"method":"corpvpn.state.get"}')
+          $c2[1].WriteLine('{"jsonrpc":"2.0","id":2,"method":"corpvpn.state.get"}')
+          $r1 = $c1[2].ReadLine(); $r2 = $c2[2].ReadLine()
+          Write-Host "c1: $r1"
+          Write-Host "c2: $r2"
+          if ($r1 -notmatch '"status"' -or $r2 -notmatch '"status"') { throw "pipe RPC: кто-то из клиентов не ответил (PIPE_BUSY?)" }
+          Write-Host "PIPE RPC OK (2 клиента)"
           & $bin --uninstall-service
           if (Get-Service CorpVPND -ErrorAction SilentlyContinue) { throw "служба не удалена" }
           Write-Host "E2E OK"

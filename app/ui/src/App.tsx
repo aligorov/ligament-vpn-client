@@ -225,17 +225,17 @@ function DaemonDownScreen({
   const [diag, setDiag] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function runDiag() {
+  async function runCommand(cmd: "diagnose_service" | "start_service") {
     setBusy(true);
-    setDiag(null);
+    setDiag("…выполняется…");
     try {
       if (isMock()) {
         setDiag("Мок-режим: демон не используется.");
-      } else {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const text = await invoke<string>("diagnose_service");
-        setDiag(text || "Диагностика пуста — логов ещё нет.");
+        return;
       }
+      const { invoke } = await import("@tauri-apps/api/core");
+      const text = await invoke<string>(cmd);
+      setDiag(text || "Пусто — логов ещё нет.");
     } catch (e) {
       setDiag(String(e));
     } finally {
@@ -243,15 +243,24 @@ function DaemonDownScreen({
     }
   }
 
+  async function startService() {
+    await runCommand("start_service");
+    // служба могла подняться — пробуем переподключиться
+    onRetry();
+  }
+
   return (
     <div className="center-screen">
       <div className="fatal-title">{tr("daemonDown")}</div>
       <div className="muted">{tr("daemonDownHint")}</div>
       <div className="diag-actions">
-        <button className="btn btn-primary" onClick={onRetry}>
+        <button className="btn btn-primary" onClick={startService} disabled={busy}>
+          Запустить службу
+        </button>
+        <button className="btn btn-ghost" onClick={onRetry} disabled={busy}>
           {tr("retry")}
         </button>
-        <button className="btn btn-ghost" onClick={runDiag} disabled={busy}>
+        <button className="btn btn-ghost" onClick={() => void runCommand("diagnose_service")} disabled={busy}>
           Диагностика
         </button>
       </div>
