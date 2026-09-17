@@ -99,8 +99,8 @@ jobs:
 
       # Скачиваем движки по пиннингу installer/engine-lock.json (sha256).
       - name: Fetch pinned VPN engines
-        shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File installer/fetch-engines.ps1
+        shell: pwsh
+        run: pwsh -File installer/fetch-engines.ps1
 
       # Служба corpvpnd собирается из того же репозитория и кладётся в
       # app/engines/ — Tauri упакует всё в resources → <install>\engines\.
@@ -108,7 +108,7 @@ jobs:
         run: cargo build --release -p corpvpnd
 
       - name: Stage service into engines dir
-        shell: powershell
+        shell: pwsh
         run: |
           Copy-Item target/release/corpvpnd.exe app/engines/corpvpnd.exe -Force
           # wireguard-src — исходники для самостоятельной сборки tunnel.dll;

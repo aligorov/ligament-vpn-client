@@ -1,10 +1,12 @@
 ﻿# install-service.ps1 — регистрация службы CorpVPND (запускать ОДИН раз от администратора).
+# Требует PowerShell 7+ (pwsh): передача аргументов нативным утилитам в 5.1
+# ломает кавычки. Установка: winget install Microsoft.PowerShell
 #
 # Нужен только для ручных/GPO-переустановок БЕЗ NSIS-инсталлятора: сами
 # установщики (v0.2.4+) вызывают `corpvpnd --install-service` сами.
 #
 # После установки приложения (LigamentVPN_x64-setup.exe / .msi) выполните:
-#   powershell -ExecutionPolicy Bypass -File install-service.ps1
+#   pwsh -ExecutionPolicy Bypass -File install-service.ps1
 # Параметры:
 #   -InstallDir <path>  каталог установки (по умолч. "C:\Program Files\Ligament VPN")
 #
@@ -18,6 +20,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw "Требуется PowerShell 7+ (pwsh). Установите: winget install Microsoft.PowerShell и запустите: pwsh -File install-service.ps1"
+}
 
 $service = "CorpVPND"
 $bin = Join-Path $InstallDir "engines\corpvpnd.exe"
