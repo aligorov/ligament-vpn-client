@@ -140,7 +140,7 @@ http://127.0.0.1:*/cb
 `engines`. Если нужно собрать MSI самостоятельно — запустите:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\fetch-engines.ps1
+pwsh -File installer\fetch-engines.ps1   # PowerShell 7+; если нет — winget install Microsoft.PowerShell
 ```
 
 Движки ставятся в `%PROGRAMDATA%\Ligament\CorpVPN\engines` с ACL на
