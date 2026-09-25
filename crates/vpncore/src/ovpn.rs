@@ -77,7 +77,13 @@ pub fn parse(config: &str) -> OvpnInfo {
 ///   management-интерфейсу; файл с паролем на диске нам не нужен);
 /// - если `auth-user-pass` нет — добавляет (портал выдаёт конфиги с авторизацией);
 /// - гарантирует `auth-nocache` (пароль не оседает в памяти openvpn);
-/// - удаляет `askpass <файл>` (интерактивных запросов быть не может).
+/// - удаляет `askpass <файл>` (интерактивных запросов быть не может);
+/// - **вырезает директивы запуска внешних программ** (`script-security`,
+///   `up`, `down`, `route-up`, `iproute`, `client-connect`/`-disconnect`,
+///   `learn-address`, `tls-verify`, `ipchange`): конфиг исполняется службой
+///   от SYSTEM, и .ovpn с `script-security 2` + `up "cmd /c …"` — это
+///   локальное повышение привилегий (аудит A-1). Демон дополнительно
+///   форсирует `--script-security 1` в командной строке openvpn.
 ///
 /// Остальные строки (включая комментарии и `<ca>`-блоки) сохраняются как есть.
 #[must_use]
@@ -89,10 +95,14 @@ pub fn normalize(config: &str) -> String {
     for raw in config.lines() {
         let trimmed = raw.trim();
         if trimmed.is_empty() || is_comment(trimmed) {
-            out.push(raw.to_owned()); // комментарии/пустые строки сохраняем как есть
+            out.push(raw.to_owned()); // комментарии/пустые строки сохраняются как есть
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
+        let first = lower.split_whitespace().next().unwrap_or_default();
+        if SCRIPT_DIRECTIVES.contains(&first) {
+            continue; // внешние программы из конфига не запускаем (аудит A-1)
+        }
         if lower.starts_with("askpass") {
             continue; // выкинуть интерактивный запрос пароля
         }
@@ -119,6 +129,25 @@ pub fn normalize(config: &str) -> String {
     result.push('\n');
     result
 }
+
+/// Директивы, запускающие внешние программы или загружающие код
+/// (вырезаются при normalize). Сравнение — по первому токену строки
+/// (`up` не задевает `update…`), регистр не важен.
+const SCRIPT_DIRECTIVES: &[&str] = &[
+    "script-security",
+    "up",
+    "down",
+    "route-up",
+    "iproute",
+    "iproute-netnspath",
+    "client-connect",
+    "client-disconnect",
+    "learn-address",
+    "tls-verify",
+    "ipchange",
+    "tls-export-cert",
+    "plugin",
+];
 
 /// Эвристика «похоже ли на .ovpn» (для автоопределения импорта).
 #[must_use]
@@ -189,6 +218,45 @@ MIIF...
         assert!(norm.contains("resolv-retry infinite"));
         assert!(norm.contains("# Корпоративный OpenVPN"));
         // повторная нормализация идемпотентна
+        assert_eq!(normalize(&norm), norm);
+    }
+
+    #[test]
+    fn normalize_strips_script_directives() {
+        // аудит A-1: script-директивы = код от SYSTEM, вырезаем целиком
+        let evil = "client\n\
+            script-security 2\n\
+            up \"cmd /c net user evil P@ss /add\"\n\
+            down /tmp/cleanup.sh\n\
+            route-up C:\\\\evil.bat\n\
+            iproute /sbin/ip\n\
+            client-connect hook.sh\n\
+            learn-address addr.sh\n\
+            tls-verify check.sh\n\
+            ipchange change.cmd\n\
+            plugin openvpn-plugin-down-root.so\n\
+            remote vpn.example.com 1194\n\
+            verb 3\n";
+        let norm = normalize(evil);
+        for banned in [
+            "script-security",
+            "cmd /c",
+            "cleanup.sh",
+            "evil.bat",
+            "hook.sh",
+            "addr.sh",
+            "check.sh",
+            "change.cmd",
+            "iproute",
+            "plugin",
+        ] {
+            assert!(!norm.contains(banned), "«{banned}» должен быть вырезан: {norm}");
+        }
+        // легитимные директивы не задеты
+        assert!(norm.contains("remote vpn.example.com 1194"));
+        assert!(norm.contains("verb 3"));
+        assert!(norm.lines().any(|l| l.trim() == "auth-user-pass"));
+        // идемпотентность
         assert_eq!(normalize(&norm), norm);
     }
 

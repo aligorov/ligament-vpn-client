@@ -80,6 +80,118 @@ pub fn ensure_dirs() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Готовит каталоги данных к безопасной работе (аудит A-3/A-21):
+/// закрывает права и вычищает конфиги туннелей, оставшиеся от прошлых
+/// запусков (в них приватные ключи WireGuard). Ошибки не фатальны —
+/// служба обязана подниматься, — но логируются.
+pub fn secure_data_paths() {
+    restrict(&data_dir());
+    restrict(&tunnels_dir());
+    restrict(&logs_dir());
+    if profiles_path().exists() {
+        restrict(&profiles_path());
+    }
+    if key_path().exists() {
+        restrict(&key_path());
+    }
+    if let Ok(entries) = std::fs::read_dir(tunnels_dir()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name.starts_with("corpvpn-") {
+                if let Err(e) = std::fs::remove_file(entry.path()) {
+                    tracing::warn!(path = %entry.path().display(), error = %e,
+                        "не удалить остаток конфига туннеля");
+                }
+            }
+        }
+    }
+}
+
+/// SDDL данных демона: полный доступ только SYSTEM и Администраторам,
+/// наследование от ProgramData отключено (PROTECTED) — по умолчанию
+/// Users получают право чтения, а здесь ключ шифрования и профили
+/// с приватными ключами (аудит A-3).
+#[cfg(windows)]
+const DATA_SDDL: &str = "D:PA(A;;FA;;;SY)(A;;FA;;;BA)";
+
+/// Закрывает файл/каталог для всех, кроме владельца-службы:
+/// Windows — DACL SYSTEM+Админы без наследования, unix — 0700/0600.
+pub fn restrict(path: &std::path::Path) {
+    if let Err(e) = restrict_impl(path) {
+        tracing::warn!(path = %path.display(), error = %e, "не ограничить права пути");
+    }
+}
+
+#[cfg(windows)]
+fn restrict_impl(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::{LocalFree, WIN32_ERROR};
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{
+        GetSecurityDescriptorDacl, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID,
+    };
+    use windows::core::PCWSTR;
+
+    let mut sddl: Vec<u16> = DATA_SDDL.encode_utf16().chain([0]).collect();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: sddl — NUL-терминированная строка; дескриптор освобождаем ниже.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            None,
+        )
+        .map_err(std::io::Error::other)?;
+
+        let mut dacl_present = windows::Win32::Foundation::BOOL::default();
+        let mut dacl_defaulted = windows::Win32::Foundation::BOOL::default();
+        let mut dacl = std::ptr::null_mut();
+        let result = GetSecurityDescriptorDacl(
+            descriptor,
+            &mut dacl_present,
+            &mut dacl,
+            &mut dacl_defaulted,
+        )
+        .and_then(|()| {
+            if !dacl_present.as_bool() {
+                return Err(std::io::Error::other("SDDL без DACL"));
+            }
+            let mut wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+            // null-PSID: владелец/группа не меняются, только DACL
+            let res = SetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                PSID(std::ptr::null_mut()),
+                PSID(std::ptr::null_mut()),
+                Some(dacl.cast_const()),
+                None,
+            );
+            if res != WIN32_ERROR(0) {
+                return Err(std::io::Error::from_raw_os_error(res.0 as i32));
+            }
+            Ok(())
+        });
+        let _ = LocalFree(windows::Win32::Foundation::HLOCAL(descriptor.0));
+        result
+    }
+}
+
+/// На unix демон работает от пользователя: 0700 каталоги, 0600 файлы.
+#[cfg(unix)]
+fn restrict_impl(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::metadata(path)?;
+    let mode = if meta.is_dir() { 0o700 } else { 0o600 };
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

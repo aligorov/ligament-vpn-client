@@ -328,15 +328,49 @@ fn pipe_alive_windows() -> bool {
 use serde_json::Value;
 use tauri::{Manager, WindowEvent};
 
+/// Методы JSON-RPC, разрешённые для вызова из webview (аудит A-5):
+/// компрометация UI не должна давать методы сверх тех, что реально
+/// использует интерфейс.
+const RPC_METHOD_ALLOWLIST: &[&str] = &[
+    "corpvpn.state.get",
+    "corpvpn.connect",
+    "corpvpn.disconnect",
+    "corpvpn.profiles.list",
+    "corpvpn.profiles.import",
+    "corpvpn.profiles.delete",
+    "corpvpn.profiles.update",
+    "corpvpn.settings.get",
+    "corpvpn.settings.set",
+    "corpvpn.logs.tail",
+    "corpvpn.portal.oidc.start",
+    "corpvpn.portal.login",
+    "corpvpn.portal.sync",
+    "corpvpn.portal.logout",
+];
+
 /// Прокси JSON-RPC к демону. Возвращает сырой конверт строкой — UI разбирает сам.
 #[tauri::command]
 async fn rpc(method: String, params: Option<Value>) -> Result<String, String> {
+    if !RPC_METHOD_ALLOWLIST.contains(&method.as_str()) {
+        // аудит A-5: белый список методов вместо прозрачного прокси
+        return Err(format!("Метод недоступен из UI: {method}"));
+    }
     transport::rpc_envelope(&method, params).await
 }
 
 #[tauri::command]
 async fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
+    // аудит A-6: только https (и http на loopback — локальная отладка);
+    // произвольные схемы (file://, search-ms:, кастомные обработчики) — фишинг
+    let allowed = url
+        .strip_prefix("https://")
+        .is_some()
+        || url.starts_with("http://localhost")
+        || url.starts_with("http://127.0.0.1");
+    if !allowed {
+        return Err(format!("Открытие адреса запрещено: {url}"));
+    }
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())

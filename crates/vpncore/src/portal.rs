@@ -113,6 +113,34 @@ pub fn discovery_url(issuer: &str) -> String {
     format!("{}/.well-known/openid-configuration", issuer.trim_end_matches('/'))
 }
 
+/// Схема URL разрешена для портала/IdP? Только https; http — лишь для
+/// loopback-хостов (локальная разработка портала). Аудит A-12/A-19:
+/// по http логин/пароль и токены ушли бы открытым текстом.
+#[must_use]
+pub fn is_allowed_scheme(url: &Url) -> bool {
+    match url.scheme() {
+        "https" => true,
+        "http" => matches!(
+            url.host_str().unwrap_or_default(),
+            "localhost" | "127.0.0.1" | "::1"
+        ),
+        _ => false,
+    }
+}
+
+/// Проверка URL портала/issuer перед использованием (RU-текст ошибки).
+/// Пустая строка проходит («не задан» — не проверяем).
+pub fn validate_external_url(raw: &str) -> Result<(), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    match Url::parse(trimmed) {
+        Ok(url) if is_allowed_scheme(&url) => Ok(()),
+        _ => Err("Адрес должен быть https:// (http допускается только для localhost)".into()),
+    }
+}
+
 /// PKCE code_verifier: 32 случайных байта → base64url без padding = ровно 43
 /// символа из unreserved-набора (RFC 7636 §4.1).
 pub fn generate_code_verifier() -> String {
@@ -279,12 +307,14 @@ pub struct PortalClient {
 
 impl PortalClient {
     /// Создаёт клиент для базового URL портала (например `https://vpn.example.com`).
+    /// Аудит A-12/A-19: только `https://`; `http://` — исключительно для
+    /// loopback (локальная разработка портала).
     pub fn new(portal_url: &str) -> Result<Self, PortalError> {
         let mut url = Url::parse(portal_url.trim_end_matches('/'))
             .map_err(|_| PortalError::Parse)?;
         url.set_fragment(None);
         url.set_query(None);
-        if !matches!(url.scheme(), "http" | "https") {
+        if !is_allowed_scheme(&url) {
             return Err(PortalError::Parse);
         }
         let http = reqwest::Client::builder()
@@ -482,6 +512,18 @@ impl PortalClient {
         .await?;
         Ok(())
     }
+
+    /// Выход устройства с Bearer-токеном: портал отзывает именно этот
+    /// токен (аудит P-1 — раньше Bearer жил вечно и не отзывался вовсе).
+    pub async fn logout_bearer(&self, bearer: &str) -> Result<(), PortalError> {
+        self.response_json(
+            self.http
+                .post(self.endpoint("/api/portal/logout"))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {bearer}")),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -605,13 +647,30 @@ mod tests {
     fn client_validates_portal_url() {
         assert!(PortalClient::new("https://vpn.example.com/").is_ok());
         assert!(PortalClient::new("http://localhost:3000").is_ok());
+        assert!(PortalClient::new("http://127.0.0.1:3000").is_ok());
         assert!(matches!(PortalClient::new("garbage"), Err(PortalError::Parse)));
         assert!(matches!(PortalClient::new("ftp://x"), Err(PortalError::Parse)));
+        // аудит A-12: http на внешний хост — пароли/токены ушли бы открытым текстом
+        assert!(matches!(
+            PortalClient::new("http://vpn.example.com"),
+            Err(PortalError::Parse)
+        ));
         let c = PortalClient::new("https://vpn.example.com").unwrap();
         assert_eq!(
             c.endpoint("/api/portal/profiles"),
             "https://vpn.example.com/api/portal/profiles"
         );
+    }
+
+    #[test]
+    fn validate_external_url_scheme_rules() {
+        assert!(validate_external_url("https://2fa.ligam.org").is_ok());
+        assert!(validate_external_url("http://localhost:3000").is_ok());
+        assert!(validate_external_url("http://127.0.0.1:8400").is_ok());
+        assert!(validate_external_url("").is_ok()); // не задан — не проверяем
+        assert!(validate_external_url("http://evil.example.com").is_err());
+        assert!(validate_external_url("file:///etc/passwd").is_err());
+        assert!(validate_external_url("not a url").is_err());
     }
 
     #[test]

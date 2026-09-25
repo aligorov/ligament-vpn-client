@@ -7,9 +7,12 @@
 //! строка. Уведомления демона (`state.changed`, `log.entry`) пишутся всем
 //! подключённым клиентам тем же форматом (broadcast).
 //!
-//! Безопасность канала (Windows): SDDL `D:P(A;;GA;;;AU)(A;;GA;;;BA)` —
-//! полный доступ интерактивным пользователям и администраторам, сетевому
-//! входу (NETWORK) прав не выдаётся вовсе (спека §6).
+//! Безопасность канала (Windows): SDDL `D:P(A;;GA;;;SY)(A;;GA;;;BA)
+//! (A;;0x12019f;;;IU)` — полный доступ SYSTEM и администраторам,
+//! интерактивным пользователям — чтение/запись (UI); сетевому входу
+//! (NETWORK) прав не выдаётся вовсе (спека §6). Аудит A-1/A-2: канал
+//! доступен любому вошедшему пользователю — вызывающий не проверяется,
+//! поэтому секреты в `profiles.list` не отдаются (см. `sanitize_profile`).
 
 use crate::state::{AppState, RpcFailure};
 use serde::Deserialize;
@@ -115,7 +118,8 @@ pub async fn dispatch(state: &Arc<AppState>, request: &str) -> String {
         "corpvpn.disconnect" => Ok(json!(state.disconnect().await)),
 
         "corpvpn.profiles.list" => Ok(json!({
-            "profiles": state.profiles().await,
+            // аудит A-2: наружу профили уходят без секретов (public_view)
+            "profiles": state.profiles().await.iter().map(vpncore::model::Profile::public_view).collect::<Vec<_>>(),
             "settings": state.settings().await,
             // Платформа демона: UI скрывает/блокирует недоступные протоколы
             "platform": platform_str(),
@@ -135,7 +139,7 @@ pub async fn dispatch(state: &Arc<AppState>, request: &str) -> String {
             state
                 .import_profile(name, config)
                 .await
-                .map(|p| json!(p))
+                .map(|p| json!(p.public_view()))
         }
 
         "corpvpn.profiles.delete" => {
@@ -154,7 +158,7 @@ pub async fn dispatch(state: &Arc<AppState>, request: &str) -> String {
             match serde_json::from_value::<vpncore::model::Profile>(
                 parsed.params.get("profile").cloned().unwrap_or(Value::Null),
             ) {
-                Ok(profile) => state.update_profile(profile).await.map(|p| json!(p)),
+                Ok(profile) => state.update_profile(profile).await.map(|p| json!(p.public_view())),
                 Err(e) => Err(params_error(format!("поле profile: {e}"))),
             }
         }
@@ -427,6 +431,15 @@ async fn serve_unix(state: Arc<AppState>) -> std::io::Result<()> {
     // возможен остался от прошлого запуска
     let _ = std::fs::remove_file(UNIX_SOCKET_PATH);
     let listener = UnixListener::bind(UNIX_SOCKET_PATH)?;
+    // аудит A-10: сокет в /tmp — боевой транспорт на macOS; без прав 0600
+    // к нему подключался любой локальный пользователь
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            UNIX_SOCKET_PATH,
+            std::fs::Permissions::from_mode(0o600),
+        )?;
+    }
     tracing::info!("RPC сервер на unix socket {}", UNIX_SOCKET_PATH);
     loop {
         let (stream, _addr) = listener.accept().await?;

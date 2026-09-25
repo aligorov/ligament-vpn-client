@@ -26,6 +26,8 @@ pub mod state;
 #[cfg(windows)]
 pub mod installer;
 #[cfg(windows)]
+pub mod policy_win;
+#[cfg(windows)]
 pub mod service;
 
 /// Имя службы Windows. ДОЛЖНО совпадать с регистрацией в SCM буква-в-букву
@@ -41,17 +43,23 @@ use vpncore::store::{EncryptedFileStore, load_or_create_key};
 /// Готовит состояние демона: каталоги, журналирование, ключ, хранилище,
 /// коллектор логов. Используется и службой, и `--console` режимом.
 ///
-/// На Windows политики читаются из HKLM (реестровый провайдер подключает
-/// инсталлер, спека §5); до его появления — `DefaultPolicyProvider`
-/// (политик нет).
+/// Политики на Windows читаются из HKLM (аудит A-7: обещанные в GUIDE-GPO
+/// политики раньше не читались вовсе), на других платформах — нет политик.
 pub fn bootstrap_state() -> Result<Arc<state::AppState>, Box<dyn std::error::Error>> {
     paths::ensure_dirs()?;
+    // аудит A-3/A-21: права на каталоги/файлы + вычистка остатков конфигов
+    paths::secure_data_paths();
     let (events, _) = tokio::sync::broadcast::channel::<String>(1024);
     logging::init(&paths::logs_dir(), events.clone());
 
     // ключ хранилища: 32 байта, создаётся при первом старте (спека §6)
     let key = load_or_create_key(&paths::key_path())?;
+    paths::restrict(&paths::key_path()); // файл мог появиться только что
     let store = Arc::new(EncryptedFileStore::new(paths::profiles_path(), key));
+    #[cfg(windows)]
+    let policy: Box<dyn vpncore::policy::PolicyProvider> =
+        Box::new(policy_win::RegistryPolicyProvider);
+    #[cfg(not(windows))]
     let policy: Box<dyn vpncore::policy::PolicyProvider> =
         Box::new(DefaultPolicyProvider);
 

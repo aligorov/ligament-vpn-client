@@ -114,6 +114,11 @@ impl VpnEngine for OpenVpnEngine {
             .arg("--management")
             .arg(format!("127.0.0.1 {}", self.port))
             .arg("--auth-nocache")
+            // аудит A-1: запрет скриптов из конфига (уровень 1 — дефолт
+            // OpenVPN: встроенные утилиты можно, пользовательские скрипты нет;
+            // CLI идёт после --config и перекрывает всё из .ovpn)
+            .arg("--script-security")
+            .arg("1")
             .arg("--log")
             .arg(&log_path)
             .stdin(std::process::Stdio::null())
@@ -309,10 +314,10 @@ async fn handle_management_line(
         match credentials {
             Some(creds) => {
                 let _ = write_half
-                    .write_all(format!("username \"{}\"\n", creds.username).as_bytes())
+                    .write_all(format!("username \"{}\"\n", mgmt_quote(&creds.username)).as_bytes())
                     .await;
                 let _ = write_half
-                    .write_all(format!("password \"{}\"\n", creds.password).as_bytes())
+                    .write_all(format!("password \"{}\"\n", mgmt_quote(&creds.password)).as_bytes())
                     .await;
             }
             None => {
@@ -366,5 +371,35 @@ async fn handle_management_line(
                 tx.store(tx_v, Ordering::Relaxed);
             }
         }
+    }
+}
+
+/// Экранирование для quoted-аргументов management-протокола OpenVPN
+/// (аудит A-20): `"` и `\` — в `\"`/`\\`, управляющие символы (переводы
+/// строк — вектор инъекции команд в канал) вырезаются.
+fn mgmt_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\r' | '\n' | '\0' => {}
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mgmt_quote;
+
+    #[test]
+    fn mgmt_quote_escapes_and_strips() {
+        assert_eq!(mgmt_quote("ivanov.i"), "ivanov.i");
+        assert_eq!(mgmt_quote(r#"p"ass\"#), r#"p\"ass\\"#);
+        // перевод строки не должен разорвать команду канала
+        assert_eq!(mgmt_quote("a\nsignal SIGTERM\nb"), "asignal SIGTERMb");
+        assert_eq!(mgmt_quote(""), "");
     }
 }

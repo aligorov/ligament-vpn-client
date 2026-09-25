@@ -87,7 +87,11 @@ pub async fn login_password(
     let user = profiles.user.clone();
     let synced = upsert_profiles(state, profiles).await;
     state.set_portal_session(cookie, true, Some(user.clone())).await;
-    Ok(PortalLoginResult { user, profiles: synced })
+    Ok(PortalLoginResult {
+        user,
+        // аудит A-2: наружу без секретов
+        profiles: synced.iter().map(Profile::public_view).collect(),
+    })
 }
 
 /// Результат входа/синхронизации для UI.
@@ -108,6 +112,9 @@ pub async fn oidc_start(
     let client = portal_client_for(state).await?;
     let issuer = default_issuer(issuer);
     let client_id = default_client_id(client_id);
+    // аудит A-12/A-19: issuer только https (loopback — для разработки),
+    // иначе id_token/код уйдут по открытому тексту или на подменный IdP
+    vpncore::portal::validate_external_url(&issuer).map_err(RpcFailure::new)?;
 
     // Порт фиксирован: redirect_uri сверяется в Ligament точным совпадением,
     // случайный порт (`:0`) не совпал бы ни с одной регистрацией.
@@ -261,15 +268,26 @@ pub async fn sync(state: &Arc<AppState>) -> Result<PortalLoginResult, RpcFailure
     .map_err(|e| RpcFailure::new(e.to_string()))?;
     let user = profiles.user.clone();
     let synced = upsert_profiles(state, profiles).await;
-    Ok(PortalLoginResult { user, profiles: synced })
+    Ok(PortalLoginResult {
+        user,
+        // аудит A-2: наружу без секретов
+        profiles: synced.iter().map(Profile::public_view).collect(),
+    })
 }
 
-/// Выход: забыть токен (и попытаться завершить сессию на портале).
+/// Выход: забыть токен и отозвать его на портале (куку — уничтожением
+/// сессии, Bearer — ревокацией именно этого токена; аудит P-1).
 pub async fn logout(state: &Arc<AppState>) -> Result<(), RpcFailure> {
     if let Some((token, is_cookie)) = state.portal_session().await {
-        if is_cookie {
-            if let Ok(client) = portal_client_for(state).await {
-                let _ = client.logout(&token).await;
+        if let Ok(client) = portal_client_for(state).await {
+            let result = if is_cookie {
+                client.logout(&token).await
+            } else {
+                client.logout_bearer(&token).await
+            };
+            if let Err(e) = result {
+                // портал недоступен — локально всё равно выходим
+                tracing::warn!(error = %e, "не отозвать сессию на портале");
             }
         }
     }

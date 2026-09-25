@@ -177,6 +177,16 @@ impl AppState {
         profile_id: &str,
         credentials: Option<Credentials>,
     ) -> Result<VpnState, RpcFailure> {
+        // политика RequireLogin: без входа на портал туннель не поднимается
+        // (GUIDE-GPO §4; аудит A-7 — раньше не исполнялась)
+        if self.policies().require_login == Some(true) {
+            let has_session = self.data.read().await.portal_token.is_some();
+            if !has_session {
+                return Err(RpcFailure::new(
+                    "Политика организации: сначала выполните вход на портал",
+                ));
+            }
+        }
         let mut engine_slot = self
             .engine
             .lock()
@@ -335,17 +345,43 @@ impl AppState {
 
     /// Обновление профиля (имя, overrides) поверх существующего id.
     pub async fn update_profile(&self, profile: Profile) -> Result<Profile, RpcFailure> {
-        profile.validate().map_err(RpcFailure::new)?;
         let mut data = self.data.write().await;
         let existing = data
             .profiles
-            .iter_mut()
+            .iter()
             .find(|p| p.id == profile.id)
+            .cloned()
             .ok_or_else(|| RpcFailure::new("Профиль не найден"))?;
         let mut updated = profile;
+        // аудит A-2: UI работает с профилями без секретов — пустые конфиги
+        // во входящем профиле означают «секреты не менять», сохраняем текущие
+        if updated
+            .wg
+            .as_ref()
+            .is_none_or(|w| w.config.trim().is_empty())
+        {
+            updated.wg.clone_from(&existing.wg);
+        }
+        if updated
+            .ovpn
+            .as_ref()
+            .is_none_or(|o| o.config.trim().is_empty())
+        {
+            updated.ovpn.clone_from(&existing.ovpn);
+        }
+        if updated
+            .vless
+            .as_ref()
+            .is_none_or(|v| v.uri.trim().is_empty())
+        {
+            updated.vless.clone_from(&existing.vless);
+        }
+        updated.validate().map_err(RpcFailure::new)?;
         updated.created_at = existing.created_at;
         updated.updated_at = now_epoch();
-        *existing = updated.clone();
+        if let Some(slot) = data.profiles.iter_mut().find(|p| p.id == updated.id) {
+            *slot = updated.clone();
+        }
         self.persist(&data)?;
         Ok(updated)
     }
@@ -361,6 +397,9 @@ impl AppState {
 
     /// Сохраняет пользовательские настройки; политики поверх — всегда.
     pub async fn set_settings(&self, mut settings: Settings) -> Result<Settings, RpcFailure> {
+        // аудит A-12/A-19: портал только https (http — лишь localhost),
+        // иначе учётные данные уйдут по открытому тексту
+        vpncore::portal::validate_external_url(&settings.portal_url).map_err(RpcFailure::new)?;
         let mut data = self.data.write().await;
         data.settings = settings.clone();
         apply_policies(&mut data.settings, &self.policies());
@@ -585,14 +624,54 @@ mod tests {
         let state = test_state(&dir, Policies::default());
         let p = state.import_profile("corp", &wg_profile().wg.unwrap().config).await.unwrap();
         let mut updated = p.clone();
-        updated.name = "Переименованный".into();
+        updated.name = "Переименован".into();
         updated.overrides.dns = Some(vec!["10.0.0.53".into()]);
         let saved = state.update_profile(updated).await.unwrap();
-        assert_eq!(saved.name, "Переименованный");
+        assert_eq!(saved.name, "Переименован");
         assert_eq!(state.profiles().await.len(), 1);
         state.delete_profile(&saved.id).await.unwrap();
         assert!(state.profiles().await.is_empty());
         assert!(state.delete_profile(&saved.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_from_sanitized_profile_keeps_secrets() {
+        // аудит A-2: UI получает профили через public_view() (секреты пустые),
+        // обновление имени/overrides не должно стирать конфиги
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(&dir, Policies::default());
+        let p = state.import_profile("corp", &wg_profile().wg.unwrap().config).await.unwrap();
+        let mut sanitized = p.public_view();
+        assert!(sanitized.wg.as_ref().unwrap().config.is_empty());
+        sanitized.name = "Новое имя".into();
+        let saved = state.update_profile(sanitized).await.unwrap();
+        assert_eq!(saved.name, "Новое имя");
+        // секрет вернулся в хранилище и в состоянии демона
+        assert!(!saved.wg.as_ref().unwrap().config.is_empty());
+        let stored = state.profiles().await.remove(0);
+        assert!(!stored.wg.as_ref().unwrap().config.is_empty());
+        assert!(stored.validate().is_ok(), "профиль остаётся подключаемым");
+    }
+
+    #[tokio::test]
+    async fn require_login_policy_blocks_connect_without_session() {
+        // аудит A-7: политика RequireLogin из HKLM должна исполняться
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(
+            &dir,
+            Policies {
+                require_login: Some(true),
+                ..Policies::default()
+            },
+        );
+        ensure_fake_xray();
+        let p = state.import_profile("corp", &vless_uri()).await.unwrap();
+        let err = state.connect(&p.id, None).await.unwrap_err();
+        assert!(err.user_message.contains("выполните вход"));
+        // после входа (сессия есть) подключение проходит
+        state.set_portal_session("tok".into(), false, None).await;
+        state.connect(&p.id, None).await.unwrap();
+        state.disconnect().await;
     }
 
     #[tokio::test]

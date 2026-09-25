@@ -166,6 +166,25 @@ impl Profile {
             ProfileKind::Vless => self.vless.as_ref().map(|v| v.uri.as_str()),
         }
     }
+
+    /// Копия профиля без секретов — для RPC-ответов UI и логов (аудит A-2:
+    /// канал RPC доступен любому локальному пользователю, приватные ключи
+    /// WG, конфиги OpenVPN и vless://-ссылки наружу не отдаются; пустое
+    /// секретное поле в `corpvpn.profiles.update` означает «не менять»).
+    #[must_use]
+    pub fn public_view(&self) -> Self {
+        let mut p = self.clone();
+        if let Some(wg) = &mut p.wg {
+            wg.config = String::new();
+        }
+        if let Some(ovpn) = &mut p.ovpn {
+            ovpn.config = String::new();
+        }
+        if let Some(vless) = &mut p.vless {
+            vless.uri = String::new();
+        }
+        p
+    }
 }
 
 /// Статус туннеля. Сериализуется как `"disconnected" | "connecting" | …`.
