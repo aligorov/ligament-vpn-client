@@ -152,12 +152,15 @@ fn restrict_impl(path: &std::path::Path) -> std::io::Result<()> {
         let mut dacl_present = windows::Win32::Foundation::BOOL::default();
         let mut dacl_defaulted = windows::Win32::Foundation::BOOL::default();
         let mut dacl = std::ptr::null_mut();
+        // GetSecurityDescriptorDacl возвращает windows_result::Error —
+        // приводим к io::Error (единый тип функции)
         let result = GetSecurityDescriptorDacl(
             descriptor,
             &mut dacl_present,
             &mut dacl,
             &mut dacl_defaulted,
         )
+        .map_err(|e| std::io::Error::from_raw_os_error(e.code().0))
         .and_then(|()| {
             if !dacl_present.as_bool() {
                 return Err(std::io::Error::other("SDDL без DACL"));
